@@ -6,6 +6,7 @@ app.log
 tradingBot.log
 uploads
 dist-ssr
+.env
 *.local
 .eslintcache
 report.html

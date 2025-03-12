@@ -84,7 +84,7 @@ async function runStrategy() {
     }
     log(`K线:${JSON.stringify(close_prices)}`)
     // 趋势判断：过去 6 小时价格是否跌幅超过 5%
-    if (latest_price < price_6_hours_ago * 0.95 && usdtBalance > 10) {
+    if (latest_price < price_6_hours_ago * 0.94 && usdtBalance > 10) {
         
        let res = await placeOrder(symbol, "buy", trade_amount, latest_price);
        if(res.code == 0){
@@ -123,20 +123,21 @@ async function runStrategy() {
     }
 }
 
-function scheduleRunStrategy() {
-    const now = new Date();
-    const minutes = now.getMinutes();
-    const seconds = now.getSeconds();
-    const milliseconds = now.getMilliseconds();
+// function scheduleRunStrategy() {
+//     const now = new Date();
+//     const minutes = now.getMinutes();
+//     const seconds = now.getSeconds();
+//     const milliseconds = now.getMilliseconds();
 
-    // 计算距离下一个整点30分钟的时间
-    const delay = ((30 - minutes % 60) * 60 * 1000) - (seconds * 1000) - milliseconds;
+//     // 计算距离下一个整点30分钟的时间
+//     const delay = ((30 - minutes % 60) * 60 * 1000) - (seconds * 1000) - milliseconds;
 
-    setTimeout(() => {
-        runStrategy();
-        // 每小时的30分钟运行一次策略
-        setInterval(runStrategy, 60 * 60 * 1000);
-    }, delay);
-}
+//     setTimeout(() => {
+//         runStrategy();
+//         // 每小时的30分钟运行一次策略
+//         setInterval(runStrategy, 60 * 60 * 1000);
+//     }, delay);
+// }
 
-scheduleRunStrategy();
+// scheduleRunStrategy();
+setInterval(runStrategy, 60 * 60 * 1000+(Math.floor(Math.random() * 6) + 1)*60*1000);

@@ -73,8 +73,8 @@ async function placeOrder(symbol, side, size, price) {
 async function ordersPending(symbol) {
     return await okxRequest("GET", `/trade/orders-pending?instId=${symbol}`);
 }
-async function ordersHistory(symbol) {
-    return await okxRequest("GET", `/trade/orders-history?instType=SPOT&instId=${symbol}`);
+async function ordersHistory(instType="SPOT",symbol) {
+    return await okxRequest("GET", `/trade/orders-history?instType=${instType}&instId=${symbol}`);
 }
 async function cancelOrder(symbol, orderId) {
     return await okxRequest("POST", `/trade/cancel-order`, {

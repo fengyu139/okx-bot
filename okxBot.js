@@ -123,6 +123,20 @@ async function runStrategy() {
     }
 }
 
-runStrategy();
-// 每小时运行一次策略
-setInterval(runStrategy, 60 * 60 * 1000+120000);
+function scheduleRunStrategy() {
+    const now = new Date();
+    const minutes = now.getMinutes();
+    const seconds = now.getSeconds();
+    const milliseconds = now.getMilliseconds();
+
+    // 计算距离下一个整点30分钟的时间
+    const delay = ((30 - minutes % 60) * 60 * 1000) - (seconds * 1000) - milliseconds;
+
+    setTimeout(() => {
+        runStrategy();
+        // 每小时的30分钟运行一次策略
+        setInterval(runStrategy, 60 * 60 * 1000);
+    }, delay);
+}
+
+scheduleRunStrategy();

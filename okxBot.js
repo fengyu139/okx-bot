@@ -140,4 +140,5 @@ async function runStrategy() {
 // }
 
 // scheduleRunStrategy();
+runStrategy()
 setInterval(runStrategy, 60 * 60 * 1000+(Math.floor(Math.random() * 6) + 1)*60*1000);

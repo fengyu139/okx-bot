@@ -4,6 +4,7 @@ dist
 logs
 app.log
 tradingBot.log
+okxLeverageBot.log
 uploads
 dist-ssr
 .env

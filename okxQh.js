@@ -9,10 +9,15 @@ const API_KEY = process.env.OKX_API_KEY;
 const API_SECRET = process.env.OKX_SECRET_KEY;
 const API_PASSPHRASE = process.env.OKX_PASSPHRASE;
 const BASE_URL = process.env.OKX_BASE_URL;
+//'BTC', 'ETH', 'LINK', 'XRP',
+const instArr = ['IP']; // 支持的币种数组
 
-let last_order_price = 0; // 记录上一次开仓价格
-let position_side = ""; // 记录当前持仓方向（"long" 或 "short"）
-let position_size = 0; // 记录当前持仓数量
+// 动态初始化交易状态
+let tradingState = {};
+instArr.forEach(instId => {
+    tradingState[instId] = { last_order_price: 0, position_side: "", position_size: 0 };
+});
+
 const logFile = fs.createWriteStream('okxLeverageBot.log', { flags: 'a' });
 
 function log(message) {
@@ -32,7 +37,7 @@ function signRequest(method, path, body = "") {
 
 // ✅ 获取 OKX 账户余额
 async function getAccountBalance() {
-    const path = "/api/v5/account/balance";
+    const path = `/api/v5/account/balance?ccy=${instArr.join(",")},USDT`;
     const { timestamp, signature } = signRequest("GET", path);
     const headers = {
         "OK-ACCESS-KEY": API_KEY,
@@ -49,30 +54,30 @@ async function getAccountBalance() {
     }
 }
 
-// ✅ 获取 XRP 价格
-async function getXRPPrice() {
-    const url = `${BASE_URL}/api/v5/market/ticker?instId=XRP-USDT`;
+// ✅ 获取币种价格
+async function getPrice(instId) {
+    const url = `${BASE_URL}/api/v5/market/ticker?instId=${instId}-USDT`;
     const response = await axios.get(url);
     return parseFloat(response.data.data[0].last);
 }
 
 // ✅ 获取历史 K 线数据
-async function getKlines() {
-    const url = `${BASE_URL}/api/v5/market/candles?instId=XRP-USDT&bar=1H&limit=6`;
+async function getKlines(instId) {
+    const url = `${BASE_URL}/api/v5/market/candles?instId=${instId}-USDT&bar=1H&limit=6`;
     const response = await axios.get(url);
     return response.data.data.map(k => parseFloat(k[4])); // 取收盘价
 }
 
 // ✅ 执行杠杆交易（开多/开空）
-async function placeOrder(side, size) {
+async function placeOrder(instId, side, size) {
     const path = "/api/v5/trade/order";
     const body = JSON.stringify({
-        instId: "XRP-USDT",
-        tdMode: "cross", // 10 倍杠杆
-        side: side, // "buy" = 开多, "sell" = 开空
+        instId: `${instId}-USDT`,
+        tdMode: "cross",
+        side: side,
         ordType: "market",
-        sz: size.toString(), // 下单数量
-        lever: "10", // 10x 杠杆
+        sz: size.toString(),
+        lever: "10",
         ccy: "USDT"
     });
 
@@ -87,22 +92,22 @@ async function placeOrder(side, size) {
 
     try {
         const response = await axios.post(`${BASE_URL}${path}`, body, { headers });
-        log(`✅ ${side === "buy" ? "开多" : "开空"} ${size} XRP，价格: 最新市价`);
-        last_order_price = await getXRPPrice(); // 记录开仓价格
-        position_side = side === "buy" ? "long" : "short"; // 记录持仓方向
-        return response.data
+        log(`✅ ${side === "buy" ? "开多" : "开空"} ${size} ${instId}，价格: 最新市价`);
+        tradingState[instId].last_order_price = await getPrice(instId); // 记录开仓价格
+        tradingState[instId].position_side = side === "buy" ? "long" : "short"; // 记录持仓方向
+        return response.data;
     } catch (error) {
         console.error("❌ 交易失败:", error.response);
-        return error.response.data
+        return error.response.data;
     }
 }
 
 // ✅ 平仓（盈利 40% 退出）
-async function closePosition(size) {
+async function closePosition(instId, size) {
     const path = "/api/v5/trade/order";
-    const close_side = position_side === "long" ? "sell" : "buy"; // 多头用 "sell" 平仓, 空头用 "buy" 平仓
+    const close_side = tradingState[instId].position_side === "long" ? "sell" : "buy";
     const body = JSON.stringify({
-        instId: "XRP-USDT",
+        instId: `${instId}-USDT`,
         tdMode: "cross",
         side: close_side,
         ordType: "market",
@@ -120,76 +125,75 @@ async function closePosition(size) {
     };
 
     try {
-       let res = await axios.post(`${BASE_URL}${path}`, body, { headers });
-       if(res.data.code == 0){
-        log(`✅ 平仓 ${size} USDT 40%`);
-        position_side = ""; // 清空持仓方向
-        return res.data
-       }else{
-        console.error("❌ 平仓失败:", res.data);
-        return res.data
-       }
+        let res = await axios.post(`${BASE_URL}${path}`, body, { headers });
+        if (res.data.code == 0) {
+            tradingState[instId].position_side = ""; // 清空持仓方向
+            return res.data;
+        } else {
+            console.error("❌ 平仓失败:", res.data);
+            return res.data;
+        }
     } catch (error) {
         console.error("❌ 平仓失败:", error.response.data);
-        return error.response.data
+        return error.response.data;
     }
 }
 
 // ✅ 交易策略
-async function strategy() {
-    const prices = await getKlines();
-    if (prices.length < 6) return; // 确保有足够数据
+async function strategy(instId) {
+    const prices = await getKlines(instId);
+    if (prices.length < 6) return;
 
-    const latest_price =prices[0] // 最新价格
-    const price_6_hours_ago =  prices[prices.length - 1]; // 6 小时前价格
-    log(`最新价格:${latest_price}`)
-    log(`6小时前价格:${price_6_hours_ago}`)
+    const latest_price = prices[0];
+    const price_6_hours_ago = prices[prices.length - 1];
+    log(`最新价格(${instId}):${latest_price}`);
+    log(`6小时前价格(${instId}):${price_6_hours_ago}`);
     const balance = await getAccountBalance();
-    const quote_balance = parseFloat(balance.details.find(b => b.ccy === "USDT").availBal);
-    const base_balance = parseFloat(balance.details.find(b => b.ccy === "XRP").availBal);
-    log(`USDT余额:${quote_balance}`)
-    let orders = await ordersPending("XRP-USDT");
-    // log(`挂单:${JSON.stringify(orders)}`)
-    let history = await ordersHistory("SPOT","XRP-USDT");
-    // log(`历史:${JSON.stringify(history.data[0])}`)
-    let trade_amount = (quote_balance * 0.3) / latest_price*10;
+    const quote_balance = parseFloat(balance.details.find(b => b.ccy === "USDT")?.availBal);
+    const base_balance = parseFloat(balance.details.find(b => b.ccy === instId)?.availBal);
+    log(`USDT余额:${quote_balance}`);
+    let orders = await ordersPending(`${instId}-USDT`);
+    let history = await ordersHistory("SPOT", `${instId}-USDT`);
+    let trade_amount = (quote_balance * 0.3) / latest_price * 10;
 
     // ✅ 开多（价格跌 6%）
     if (latest_price < price_6_hours_ago * 0.94 && quote_balance > 10) {
-        let res = await placeOrder("buy", trade_amount);
-        if(res.data.code == 0){
-            log(`开多:${JSON.stringify(res)}`)
-            position_size = position_size+trade_amount;
-        }else{
+        let res = await placeOrder(instId, "buy", trade_amount);
+        if (res.data.code == 0) {
+            log(`开多:${JSON.stringify(res)}`);
+            tradingState[instId].position_size += trade_amount;
+        } else {
             console.error("❌ 开多失败:", res.data);
         }
     }
     // ✅ 开空（价格涨 5%）
     if (latest_price > price_6_hours_ago * 1.04 && quote_balance > 10) {
-       let res = await placeOrder("sell", trade_amount);
-       if(res.data.code == 0){
-        log(`开空:${JSON.stringify(res)}`)
-        position_size = position_size+trade_amount;
-       }else{
-        console.error("❌ 开空失败:", res.data);
-       }
+        let res = await placeOrder(instId, "sell", trade_amount);
+        if (res.data.code == 0) {
+            log(`开空:${JSON.stringify(res)}`);
+            tradingState[instId].position_size += trade_amount;
+        } else {
+            console.error("❌ 开空失败:", res.data);
+        }
     }
     // ✅ 盈利 40% 平仓
-    if (position_side === "long" && latest_price >= last_order_price * 1.04 && base_balance > 0) {
-        await closePosition(position_size);
-        position_size = 0;
+    if (tradingState[instId].position_side === "long" && latest_price >= tradingState[instId].last_order_price * 1.04 && base_balance > 0) {
+        await closePosition(instId, tradingState[instId].position_size);
+        tradingState[instId].position_size = 0;
     }
-    if (position_side === "short" && latest_price <= last_order_price * 0.96 && base_balance > 0) {
-        await closePosition(position_size);
-        position_size = 0;
+    if (tradingState[instId].position_side === "short" && latest_price <= tradingState[instId].last_order_price * 0.96 && base_balance > 0) {
+        await closePosition(instId, tradingState[instId].position_size);
+        tradingState[instId].position_size = 0;
     }
 }
 
 // ✅ 主循环
 async function main() {
     while (true) {
-        await strategy();
-        await new Promise(resolve => setTimeout(resolve, 30 * 60 * 1000)); // 每小时执行一次
+        for (const instId of instArr) {
+            await strategy(instId);
+        }
+        await new Promise(resolve => setTimeout(resolve, 30 * 60 * 1000));
     }
 }
 

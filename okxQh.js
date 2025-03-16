@@ -9,8 +9,8 @@ const API_KEY = process.env.OKX_API_KEY;
 const API_SECRET = process.env.OKX_SECRET_KEY;
 const API_PASSPHRASE = process.env.OKX_PASSPHRASE;
 const BASE_URL = process.env.OKX_BASE_URL;
-//'BTC', 'ETH', 'LINK', 'XRP',
-const instArr = ['IP']; // 支持的币种数组
+//'BTC', 'ETH', 'LINK', 'XRP','TRUMP','DOGE','PEPE'
+const instArr = ['BTC', 'ETH', 'LINK', 'XRP','TRUMP','DOGE','PEPE','IP','SOL','TON']; // 支持的币种数组
 
 // 动态初始化交易状态
 let tradingState = {};
@@ -92,9 +92,11 @@ async function placeOrder(instId, side, size) {
 
     try {
         const response = await axios.post(`${BASE_URL}${path}`, body, { headers });
-        log(`✅ ${side === "buy" ? "开多" : "开空"} ${size} ${instId}，价格: 最新市价`);
+        if(response.data.data[0].sCode==0){
+            log(`✅ ${side === "buy" ? "开多" : "开空"} ${size} ${instId}，价格: 最新市价`);
         tradingState[instId].last_order_price = await getPrice(instId); // 记录开仓价格
         tradingState[instId].position_side = side === "buy" ? "long" : "short"; // 记录持仓方向
+        }
         return response.data;
     } catch (error) {
         console.error("❌ 交易失败:", error.response);
@@ -126,7 +128,7 @@ async function closePosition(instId, size) {
 
     try {
         let res = await axios.post(`${BASE_URL}${path}`, body, { headers });
-        if (res.data.code == 0) {
+        if (res.data.data[0].sCode == 0) {
             tradingState[instId].position_side = ""; // 清空持仓方向
             return res.data;
         } else {
@@ -151,7 +153,9 @@ async function strategy(instId) {
     const balance = await getAccountBalance();
     const quote_balance = parseFloat(balance.details.find(b => b.ccy === "USDT")?.availBal);
     const base_balance = parseFloat(balance.details.find(b => b.ccy === instId)?.availBal);
+    const frozenBal = parseFloat(balance.details.find(b => b.ccy === "USDT")?.frozenBal);
     log(`USDT余额:${quote_balance}`);
+    log(`冻结余额:${frozenBal}`);
     let orders = await ordersPending(`${instId}-USDT`);
     let history = await ordersHistory("SPOT", `${instId}-USDT`);
     let trade_amount = (quote_balance * 0.3) / latest_price * 10;
@@ -159,7 +163,7 @@ async function strategy(instId) {
     // ✅ 开多（价格跌 6%）
     if (latest_price < price_6_hours_ago * 0.94 && quote_balance > 10) {
         let res = await placeOrder(instId, "buy", trade_amount);
-        if (res.data.code == 0) {
+        if (res.data[0].sCode == 0) {
             log(`开多:${JSON.stringify(res)}`);
             tradingState[instId].position_size += trade_amount;
         } else {
@@ -169,7 +173,7 @@ async function strategy(instId) {
     // ✅ 开空（价格涨 5%）
     if (latest_price > price_6_hours_ago * 1.04 && quote_balance > 10) {
         let res = await placeOrder(instId, "sell", trade_amount);
-        if (res.data.code == 0) {
+        if (res.data[0].sCode == 0) {
             log(`开空:${JSON.stringify(res)}`);
             tradingState[instId].position_size += trade_amount;
         } else {
@@ -177,11 +181,11 @@ async function strategy(instId) {
         }
     }
     // ✅ 盈利 40% 平仓
-    if (tradingState[instId].position_side === "long" && latest_price >= tradingState[instId].last_order_price * 1.04 && base_balance > 0) {
+    if (tradingState[instId].position_side === "long" && latest_price >= tradingState[instId].last_order_price * 1.03 && base_balance > 0) {
         await closePosition(instId, tradingState[instId].position_size);
         tradingState[instId].position_size = 0;
     }
-    if (tradingState[instId].position_side === "short" && latest_price <= tradingState[instId].last_order_price * 0.96 && base_balance > 0) {
+    if (tradingState[instId].position_side === "short" && latest_price <= tradingState[instId].last_order_price * 0.97 && base_balance > 0) {
         await closePosition(instId, tradingState[instId].position_size);
         tradingState[instId].position_size = 0;
     }

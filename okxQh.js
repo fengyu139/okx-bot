@@ -130,6 +130,8 @@ async function closePosition(instId, size) {
         let res = await axios.post(`${BASE_URL}${path}`, body, { headers });
         if (res.data.data[0].sCode == 0) {
             tradingState[instId].position_side = ""; // 清空持仓方向
+            tradingState[instId].position_size = 0;
+            log(`✅ 平仓:${JSON.stringify(res.data)}`);
             return res.data;
         } else {
             console.error("❌ 平仓失败:", res.data);
@@ -161,7 +163,7 @@ async function strategy(instId) {
     let trade_amount = (quote_balance * 0.3) / latest_price * 10;
 
     // ✅ 开多（价格跌 6%）
-    if (latest_price < price_6_hours_ago * 0.94 && quote_balance > 10) {
+    if (latest_price < price_6_hours_ago * 0.94 && quote_balance > 10&&tradingState[instId].position_size==0) {
         let res = await placeOrder(instId, "buy", trade_amount);
         if (res.data[0].sCode == 0) {
             log(`开多:${JSON.stringify(res)}`);
@@ -171,7 +173,7 @@ async function strategy(instId) {
         }
     }
     // ✅ 开空（价格涨 5%）
-    if (latest_price > price_6_hours_ago * 1.04 && quote_balance > 10) {
+    if (latest_price > price_6_hours_ago * 1.05 && quote_balance > 10&&tradingState[instId].position_size==0) {
         let res = await placeOrder(instId, "sell", trade_amount);
         if (res.data[0].sCode == 0) {
             log(`开空:${JSON.stringify(res)}`);
@@ -179,6 +181,11 @@ async function strategy(instId) {
         } else {
             console.error("❌ 开空失败:", res.data);
         }
+    }
+    if(frozenBal<10){
+        tradingState[instId].position_side = "";
+        tradingState[instId].position_size = 0;
+        return;
     }
     // ✅ 盈利 40% 平仓
     if (tradingState[instId].position_side === "long" && latest_price >= tradingState[instId].last_order_price * 1.03 && base_balance > 0) {

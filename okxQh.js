@@ -99,7 +99,8 @@ async function placeOrder(instId, side, size) {
         }
         return response.data;
     } catch (error) {
-        console.error("❌ 交易失败:", error.response);
+        log("❌ 交易接口失败:", error.response);
+        log(JSON.stringify(body));
         return error.response.data;
     }
 }
@@ -134,16 +135,36 @@ async function closePosition(instId, size) {
             log(`✅ 平仓:${JSON.stringify(res.data)}`);
             return res.data;
         } else {
-            console.error("❌ 平仓失败:", res.data);
+            log("❌ 平仓失败:", res.data);
+            log(JSON.stringify(body));
             return res.data;
         }
     } catch (error) {
-        console.error("❌ 平仓失败:", error.response.data);
+        log("❌ 平仓接口失败:", error.response.data);
+        log(JSON.stringify(body));
         return error.response.data;
     }
 }
 
-// ✅ 交易策略
+let accountBalance = {};
+
+// 获取账户余额
+async function updateAccountBalance() {
+    try {
+        const balance = await getAccountBalance();
+        accountBalance.quote_balance = parseFloat(balance.details.find(b => b.ccy === "USDT")?.availBal);
+        accountBalance.frozenBal = parseFloat(balance.details.find(b => b.ccy === "USDT")?.frozenBal);
+        instArr.forEach(instId => {
+            accountBalance[instId] = parseFloat(balance.details.find(b => b.ccy === instId)?.availBal);
+        });
+        log(`--------USDT余额:${accountBalance.quote_balance}----------`);
+        log(`--------冻结余额:${accountBalance.frozenBal}----------`);
+    } catch (error) {
+        console.error("❌ 更新账户余额失败:", error);
+    }
+}
+
+// 交易策略
 async function strategy(instId) {
     const prices = await getKlines(instId);
     if (prices.length < 6) return;
@@ -152,14 +173,8 @@ async function strategy(instId) {
     const price_6_hours_ago = prices[prices.length - 1];
     log(`最新价格(${instId}):${latest_price}`);
     log(`6小时前价格(${instId}):${price_6_hours_ago}`);
-    const balance = await getAccountBalance();
-    const quote_balance = parseFloat(balance.details.find(b => b.ccy === "USDT")?.availBal);
-    const base_balance = parseFloat(balance.details.find(b => b.ccy === instId)?.availBal);
-    const frozenBal = parseFloat(balance.details.find(b => b.ccy === "USDT")?.frozenBal);
-    log(`USDT余额:${quote_balance}`);
-    log(`冻结余额:${frozenBal}`);
-    let orders = await ordersPending(`${instId}-USDT`);
-    let history = await ordersHistory("SPOT", `${instId}-USDT`);
+    const quote_balance = accountBalance.quote_balance;
+    const frozenBal = accountBalance.frozenBal;
     let trade_amount = (quote_balance * 0.3) / latest_price * 10;
 
     // ✅ 开多（价格跌 6%）
@@ -169,7 +184,8 @@ async function strategy(instId) {
             log(`开多:${JSON.stringify(res)}`);
             tradingState[instId].position_size += trade_amount;
         } else {
-            console.error("❌ 开多失败:", res.data);
+           log("❌ 开多失败:", res.data);
+           log(instId,latest_price,price_6_hours_ago,trade_amount,);
         }
     }
     // ✅ 开空（价格涨 5%）
@@ -179,20 +195,21 @@ async function strategy(instId) {
             log(`开空:${JSON.stringify(res)}`);
             tradingState[instId].position_size += trade_amount;
         } else {
-            console.error("❌ 开空失败:", res.data);
+            log("❌ 开空失败:", res.data);
+            log(instId,latest_price,price_6_hours_ago,trade_amount,frozenBal);
         }
     }
-    if(frozenBal<10){
+    if(accountBalance.frozenBal<10){
         tradingState[instId].position_side = "";
         tradingState[instId].position_size = 0;
         return;
     }
     // ✅ 盈利 40% 平仓
-    if (tradingState[instId].position_side === "long" && latest_price >= tradingState[instId].last_order_price * 1.03 && base_balance > 0) {
+    if (tradingState[instId].position_side === "long" && latest_price >= tradingState[instId].last_order_price * 1.03 && frozenBal > 10) {
         await closePosition(instId, tradingState[instId].position_size);
         tradingState[instId].position_size = 0;
     }
-    if (tradingState[instId].position_side === "short" && latest_price <= tradingState[instId].last_order_price * 0.97 && base_balance > 0) {
+    if (tradingState[instId].position_side === "short" && latest_price <= tradingState[instId].last_order_price * 0.97 && frozenBal > 10) {
         await closePosition(instId, tradingState[instId].position_size);
         tradingState[instId].position_size = 0;
     }
@@ -201,6 +218,7 @@ async function strategy(instId) {
 // ✅ 主循环
 async function main() {
     while (true) {
+        await updateAccountBalance(); // 在每次循环开始时更新账户余额
         for (const instId of instArr) {
             await strategy(instId);
         }

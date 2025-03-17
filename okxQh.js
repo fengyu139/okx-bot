@@ -133,6 +133,7 @@ async function closePosition(instId, size) {
             tradingState[instId].position_side = ""; // 清空持仓方向
             tradingState[instId].position_size = 0;
             log(`✅ 平仓:${JSON.stringify(res.data)}`);
+            log(`平仓金额:${size}USDT`);
             return res.data;
         } else {
             log("❌ 平仓失败:", res.data);
@@ -163,7 +164,24 @@ async function updateAccountBalance() {
         console.error("❌ 更新账户余额失败:", error);
     }
 }
+// 获取持仓数据
+async function getPositions(instId) {
+    const path = `/api/v5/account/positions?instId=${instId}-USDT`;
+    const { timestamp, signature } = signRequest("GET", path);
+    const headers = {
+        "OK-ACCESS-KEY": API_KEY,
+        "OK-ACCESS-SIGN": signature,
+        "OK-ACCESS-TIMESTAMP": timestamp,
+        "OK-ACCESS-PASSPHRASE": API_PASSPHRASE,
+    };
 
+    try {
+        const response = await axios.get(`${BASE_URL}${path}`, { headers });
+        return response.data;
+    } catch (error) {
+        console.error("❌ 获取持仓数据失败:", error.response.data);
+    }
+}
 // 交易策略
 async function strategy(instId) {
     const prices = await getKlines(instId);
@@ -176,7 +194,6 @@ async function strategy(instId) {
     const quote_balance = accountBalance.quote_balance;
     const frozenBal = accountBalance.frozenBal;
     let trade_amount = (quote_balance * 0.3) / latest_price * 10;
-
     // ✅ 开多（价格跌 6%）
     if (latest_price < price_6_hours_ago * 0.94 && quote_balance > 10&&tradingState[instId].position_size==0) {
         let res = await placeOrder(instId, "buy", trade_amount);
@@ -205,13 +222,21 @@ async function strategy(instId) {
         return;
     }
     // ✅ 盈利 40% 平仓
-    if (tradingState[instId].position_side === "long" && latest_price >= tradingState[instId].last_order_price * 1.03 && frozenBal > 10) {
-        await closePosition(instId, tradingState[instId].position_size);
+    if (tradingState[instId].position_side === "long" && latest_price >= tradingState[instId].last_order_price * 1.035 && frozenBal > 10) {
+        let res = await getPositions(instId);
+        let availPos=res.data.find(b=>b.availPos>1)?.availPos||0;
+       if(availPos>1){
+        await closePosition(instId, availPos);
         tradingState[instId].position_size = 0;
+       }
     }
-    if (tradingState[instId].position_side === "short" && latest_price <= tradingState[instId].last_order_price * 0.97 && frozenBal > 10) {
-        await closePosition(instId, tradingState[instId].position_size);
-        tradingState[instId].position_size = 0;
+    if (tradingState[instId].position_side === "short" && latest_price <= tradingState[instId].last_order_price * 0.965 && frozenBal > 10) {
+        let res = await getPositions(instId);
+        let availPos=res.data.find(b=>b.availPos>1)?.availPos||0;
+        if(availPos>1){
+            await closePosition(instId, availPos);
+            tradingState[instId].position_size = 0;
+        }
     }
 }
 

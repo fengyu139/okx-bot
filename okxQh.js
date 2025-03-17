@@ -189,8 +189,7 @@ async function strategy(instId) {
 
     const latest_price = prices[0];
     const price_6_hours_ago = prices[prices.length - 1];
-    log(`最新价格(${instId}):${latest_price}`);
-    log(`6小时前价格(${instId}):${price_6_hours_ago}`);
+    log(`${instId}：最新价格:${latest_price}，6小时前价格:${price_6_hours_ago}`);
     const quote_balance = accountBalance.quote_balance;
     const frozenBal = accountBalance.frozenBal;
     let trade_amount = (quote_balance * 0.3) / latest_price * 10;

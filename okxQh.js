@@ -10,7 +10,7 @@ const API_SECRET = process.env.OKX_SECRET_KEY;
 const API_PASSPHRASE = process.env.OKX_PASSPHRASE;
 const BASE_URL = process.env.OKX_BASE_URL;
 //'BTC', 'ETH', 'LINK', 'XRP','TRUMP','DOGE','PEPE'
-const instArr = ['BTC', 'ETH', 'LINK', 'XRP','TRUMP','DOGE','PEPE','IP','SOL','TON']; // 支持的币种数组
+const instArr = ['ETH', 'LINK', 'XRP','TRUMP','DOGE','PEPE','IP','SOL','TON','FIL','DOT','XAUT']; // 支持的币种数组
 
 // 动态初始化交易状态
 let tradingState = {};

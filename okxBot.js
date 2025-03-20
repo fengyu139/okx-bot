@@ -1,10 +1,22 @@
 const { getBalance, getTicker, placeOrder, getCandles, ordersPending, ordersHistory, cancelOrder } = require("./okxApi");
 const fs = require('fs');
 const dayjs = require('dayjs');
-const symbol = "XRP-USDT"; // 交易对
-const tradeAmount = 0.001; // 交易数量
-let last_buy_price = 0;  // 记录买入价，用于止损和卖出
-let buyCount=0
+
+// 支持多个交易对
+//'SUI','XRP','ADA','BNB', 'ETH','DOGE','TRX',
+const tradingPairs = ['SUI','XRP','ADA','BNB', 'ETH','DOGE','TRX'];
+const tradeAmount = 0.001; // 基础交易数量
+
+// 为每个交易对维护独立的状态
+const tradingState = {};
+tradingPairs.forEach(coin => {
+    tradingState[coin] = {
+        symbol: `${coin}-USDT`,
+        last_buy_price: 0,
+        buyCount: 0
+    };
+});
+
 const logFile = fs.createWriteStream('tradingBot.log', { flags: 'a' });
 
 function log(message) {
@@ -15,130 +27,142 @@ function log(message) {
     logFile.write(logMessage + '\n');
 }
 
-function getMarketInfo() {
-    const market_str = "XRP_USDT"; // 假设交易对为 XRP_USDT
-    let base_currency = "XRP";
-    let quote_currency = "USDT";
-    if (typeof market_str === "string") {
-        [base_currency, quote_currency] = market_str.split("_");
-    }
-    
+function getMarketInfo(symbol) {
+    const [base_currency, quote_currency] = symbol.split("-");
     return { base_currency, quote_currency };
 }
 
-async function runStrategy() {
+async function runStrategyForPair(coin, usdtBalance) {
+    const state = tradingState[coin];
+    const symbol = state.symbol;
+    
+    // 检查并取消长时间未成交的订单
     const orders = await ordersPending(symbol);
     const twoHoursAgo = dayjs().subtract(2, 'hour');
     for (const order of orders.data) {
-        const orderTime = dayjs((Number(order.cTime))); // 假设订单对象中有 timestamp 字段
+        const orderTime = dayjs((Number(order.cTime)));
         if (orderTime.isBefore(twoHoursAgo)) {
-            log(`⏳ 订单 ${order.ordId} 已挂单超过2小时，正在撤销...`);
+            log(`⏳ ${symbol} 订单 ${order.ordId} 已挂单超过2小时，正在撤销...`);
            let res = await cancelOrder(symbol, order.ordId);
            if(res.code == 0){
-            log(`✅ 订单 ${order.ordId} 已撤销`);
+            log(`✅ ${symbol} 订单 ${order.ordId} 已撤销`);
            }else{
-            log(`❌ 订单 ${order.ordId} 撤销失败`);
+            log(`❌ ${symbol} 订单 ${order.ordId} 撤销失败`);
             log(res)
            }
         }
     }
+    
     // 获取市场价格
     const ticker = await getTicker(symbol);
     if (!ticker || !ticker.data || ticker.data.length === 0) {
-        log("❌ 获取市场数据失败");
+        log(`❌ 获取 ${symbol} 市场数据失败`);
         return;
     }
     const lastPrice = parseFloat(ticker.data[0].last);
-    log(`📈 当前 XRP 价格: ${lastPrice} USDT`);
+    log(`📈 当前 ${coin} 价格: ${lastPrice} USDT`);
 
     // 获取账户余额
     const balance = await getBalance();
     if (!balance || !balance.data || balance.data.length === 0) {
-        log("❌ 获取账户余额失败");
+        log(`❌ 获取账户余额失败`);
         return;
     }
-    const usdtDetail = balance.data[0].details.find(b => b.ccy === "USDT");
-    const xrpBalance = balance.data[0].details.find(b => b.ccy === "XRP")?.availBal;
-    log(`💰 XRP 余额: ${parseInt(xrpBalance)}`);
-    const usdtBalance = parseFloat(usdtDetail?.availBal||10);
-    log(`💰 USDT 余额: ${parseInt(usdtBalance)}`);
+    
+    const coinBalance = balance.data[0].details.find(b => b.ccy === coin)?.availBal || 0;
+    log(`💰 ${coin} 余额: ${parseFloat(coinBalance).toFixed(4)}`);
 
     // 获取最近 6 根 1 小时 K 线的收盘价
     const bars = await getCandles(symbol);
     const close_prices = bars.data.slice(0,6).map(b => parseFloat(b[4]));
     if (close_prices.length < 6) {
-        log("❌ K 线数据不足");
+        log(`❌ ${symbol} K 线数据不足`);
         return;
     }
-    const latest_price =  close_prices[0];
-    const price_6_hours_ago =close_prices[close_prices.length - 1];
+    const latest_price = close_prices[0];
+    const price_6_hours_ago = close_prices[close_prices.length - 1];
+    
     // 动态获取交易对信息
-    const { base_currency, quote_currency } = getMarketInfo();
-    // 计算买入数量（30% 资金）
-    let trade_amount = (usdtBalance * 0.3) / latest_price;
-    if(buyCount==1){
-        trade_amount=(usdtBalance * 0.5) / latest_price
+    const { base_currency, quote_currency } = getMarketInfo(symbol);
+    
+    // 计算买入数量（根据买入次数调整资金比例）
+    let trade_amount;
+    if(state.buyCount == 0) {
+        trade_amount = (usdtBalance * 0.3) / latest_price;
+    } else if(state.buyCount == 1) {
+        trade_amount = (usdtBalance * 0.5) / latest_price;
+    } else if(state.buyCount == 2) {
+        trade_amount = (usdtBalance * 0.9) / latest_price;
     }
-    if(buyCount==2){
-        trade_amount=(usdtBalance * 0.9) / latest_price
-    }
-    log(`K线:${JSON.stringify(close_prices)}`)
+    
+    log(`${symbol} K线: ${JSON.stringify(close_prices)}`);
+    
     // 趋势判断：过去 6 小时价格是否跌幅超过 5%
     if (latest_price < price_6_hours_ago * 0.94 && usdtBalance > 10) {
-        
-       let res = await placeOrder(symbol, "buy", trade_amount, latest_price);
-       if(res.code == 0){
-        log(`🟢 买入 ${base_currency}: ${trade_amount}，价格: ${latest_price} ${quote_currency}`);
-        last_buy_price = latest_price;
-        buyCount++
-       }else{
-        log(`❌ 买入失败`);
-        log(res)
-       }
+        let res = await placeOrder(symbol, "buy", trade_amount, latest_price);
+        if(res.code == 0) {
+            log(`🟢 买入 ${base_currency}: ${trade_amount}，价格: ${latest_price} ${quote_currency}`);
+            state.last_buy_price = latest_price;
+            state.buyCount++;
+        } else {
+            log(`❌ ${symbol} 买入失败`);
+            log(res);
+        }
     }
 
     // 卖出操作：如果买入后价格涨了超过 4%，则卖出
-    if (last_buy_price > 0 && latest_price >= last_buy_price * 1.04&&xrpBalance>0) {
-        let res = await placeOrder(symbol, "sell", xrpBalance, latest_price);
-        if(res.code == 0){
-            log(`🔴 卖出 ${base_currency}: ${xrpBalance}，价格: ${latest_price} ${quote_currency}`);
-            buyCount=0
-        }else{
-            log(`❌ 卖出失败`);
-            log(res)
+    if (state.last_buy_price > 0 && latest_price >= state.last_buy_price * 1.04 && coinBalance > 0) {
+        let res = await placeOrder(symbol, "sell", coinBalance, latest_price);
+        if(res.code == 0) {
+            log(`🔴 卖出 ${base_currency}: ${coinBalance}，价格: ${latest_price} ${quote_currency}`);
+            state.buyCount = 0;
+        } else {
+            log(`❌ ${symbol} 卖出失败`);
+            log(res);
         }
     }
 
     // 止损机制：如果价格下跌超过 5%，卖出
-    if (last_buy_price > 0 && latest_price <= last_buy_price * 0.94) {
-        log(`🔴 止损卖出 ${base_currency}: ${xrpBalance}，价格: ${latest_price} ${quote_currency}`);
-        let res = await placeOrder(symbol, "sell", xrpBalance, latest_price);
-        if(res.code == 0){
-            log(`🔴 止损卖出 ${base_currency}: ${xrpBalance}，价格: ${latest_price} ${quote_currency}`);
-            buyCount=0
-        }else{
-            log(`❌ 止损卖出失败`);
-            log(res)
+    if (state.last_buy_price > 0 && latest_price <= state.last_buy_price * 0.94 && coinBalance > 0) {
+        let res = await placeOrder(symbol, "sell", coinBalance, latest_price);
+        if(res.code == 0) {
+            log(`🔴 止损卖出 ${base_currency}: ${coinBalance}，价格: ${latest_price} ${quote_currency}`);
+            state.buyCount = 0;
+        } else {
+            log(`❌ ${symbol} 止损卖出失败`);
+            log(res);
         }
     }
 }
 
-// function scheduleRunStrategy() {
-//     const now = new Date();
-//     const minutes = now.getMinutes();
-//     const seconds = now.getSeconds();
-//     const milliseconds = now.getMilliseconds();
+async function runStrategy() {
+    try {
+        // 获取USDT余额
+        const balance = await getBalance();
+        if (!balance || !balance.data || balance.data.length === 0) {
+            log("❌ 获取账户余额失败");
+            return;
+        }
+        const usdtDetail = balance.data[0].details.find(b => b.ccy === "USDT");
+        const usdtBalance = parseFloat(usdtDetail?.availBal || 10);
+        log(`💰 USDT 总余额: ${parseInt(usdtBalance)}`);
+        
+        // 为每个交易对分配可用USDT余额
+        const availableUsdtPerPair = usdtBalance / tradingPairs.length;
+        
+        // 为每个交易对执行策略
+        for (const coin of tradingPairs) {
+            log(`🔄 开始处理 ${coin}-USDT 交易对`);
+            await runStrategyForPair(coin, availableUsdtPerPair);
+            // 添加短暂延迟，避免API请求过于频繁
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+    } catch (error) {
+        log(`❌ 策略执行出错: ${error.message}`);
+        console.error(error);
+    }
+}
 
-//     // 计算距离下一个整点30分钟的时间
-//     const delay = ((30 - minutes % 60) * 60 * 1000) - (seconds * 1000) - milliseconds;
-
-//     setTimeout(() => {
-//         runStrategy();
-//         // 每小时的30分钟运行一次策略
-//         setInterval(runStrategy, 60 * 60 * 1000);
-//     }, delay);
-// }
-
-// scheduleRunStrategy();
-runStrategy()
-setInterval(runStrategy, 60 * 60 * 1000+(Math.floor(Math.random() * 6) + 1)*60*1000);
+runStrategy();
+// 添加随机延迟，避免每小时同一时间执行
+setInterval(runStrategy, 60 * 60 * 1000 + (Math.floor(Math.random() * 6) + 1) * 60 * 1000);

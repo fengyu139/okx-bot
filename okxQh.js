@@ -194,7 +194,7 @@ async function strategy(instId) {
     const frozenBal = accountBalance.frozenBal;
     let trade_amount = (quote_balance * 0.3) / latest_price * 10;
     // ✅ 开多（价格跌 6%）
-    if (latest_price < price_6_hours_ago * 0.94 && quote_balance > 10&&tradingState[instId].position_size==0) {
+    if (latest_price < price_6_hours_ago * 0.945 && quote_balance > 10&&tradingState[instId].position_size==0) {
         let res = await placeOrder(instId, "buy", trade_amount);
         if (res.data[0].sCode == 0) {
             log(`开多:${JSON.stringify(res)}`);
@@ -205,7 +205,7 @@ async function strategy(instId) {
         }
     }
     // ✅ 开空（价格涨 5%）
-    if (latest_price > price_6_hours_ago * 1.05 && quote_balance > 10&&tradingState[instId].position_size==0) {
+    if (latest_price > price_6_hours_ago * 1.055 && quote_balance > 10&&tradingState[instId].position_size==0) {
         let res = await placeOrder(instId, "sell", trade_amount);
         if (res.data[0].sCode == 0) {
             log(`开空:${JSON.stringify(res)}`);
@@ -215,7 +215,7 @@ async function strategy(instId) {
             log(instId,latest_price,price_6_hours_ago,trade_amount,frozenBal);
         }
     }
-    if(accountBalance.frozenBal<10){
+    if(accountBalance.frozenBal<80){
         tradingState[instId].position_side = "";
         tradingState[instId].position_size = 0;
         return;
@@ -238,7 +238,47 @@ async function strategy(instId) {
         }
     }
 }
+// 手动使用限价单平仓（更保守但可能不会立即成交）
+async function closeIPPositionLimit(instId) {
+    // 先获取当前市价
+    const ticker = await axios.get(`${BASE_URL}/api/v5/market/ticker?instId=${instId}-USDT`);
+    const currentPrice = parseFloat(ticker.data.data[0].last);
+    
+    const path = "/api/v5/trade/order";
+    const body = JSON.stringify({
+        instId: instId,
+        tdMode: "cross",
+        side: "sell",
+        ordType: "limit",       // 限价单
+        px: currentPrice.toString(), // 以当前市价挂单
+        sz: "98.57133",
+        ccy: "USDT"
+    });
 
+    const { timestamp, signature } = signRequest("POST", path, body);
+    const headers = {
+        "OK-ACCESS-KEY": API_KEY,
+        "OK-ACCESS-SIGN": signature,
+        "OK-ACCESS-TIMESTAMP": timestamp,
+        "OK-ACCESS-PASSPHRASE": API_PASSPHRASE,
+        "Content-Type": "application/json",
+    };
+
+    try {
+        const response = await axios.post(`${BASE_URL}${path}`, body, { headers });
+        if(response.data.data[0].sCode == 0) {
+            log(`✅ IP-USDT 平仓成功，数量: 98.57133`);
+            return response.data;
+        } else {
+            log(`❌ 平仓失败: ${JSON.stringify(response.data)}`);
+            return response.data;
+        }
+    } catch (error) {
+        log("❌ 平仓接口调用失败:", error.response?.data || error);
+        return error.response?.data;
+    }
+}
+// closeIPPositionLimit('IP');
 // ✅ 主循环
 async function main() {
     while (true) {

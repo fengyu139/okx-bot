@@ -63,7 +63,7 @@ async function getPrice(instId) {
 
 // ✅ 获取历史 K 线数据
 async function getKlines(instId) {
-    const url = `${BASE_URL}/api/v5/market/candles?instId=${instId}-USDT&bar=1H&limit=6`;
+    const url = `${BASE_URL}/api/v5/market/candles?instId=${instId}-USDT&bar=1H&limit=4`;
     const response = await axios.get(url);
     return response.data.data.map(k => parseFloat(k[4])); // 取收盘价
 }
@@ -166,7 +166,7 @@ async function updateAccountBalance() {
 }
 // 获取持仓数据
 async function getPositions(instId) {
-    const path = `/api/v5/account/positions?instId=${instId}-USDT`;
+    const path = `/api/v5/account/positions`;
     const { timestamp, signature } = signRequest("GET", path);
     const headers = {
         "OK-ACCESS-KEY": API_KEY,
@@ -185,16 +185,16 @@ async function getPositions(instId) {
 // 交易策略
 async function strategy(instId) {
     const prices = await getKlines(instId);
-    if (prices.length < 6) return;
+    if (prices.length < 3) return;
 
     const latest_price = prices[0];
     const price_6_hours_ago = prices[prices.length - 1];
-    log(`${instId}：最新价格:${latest_price}，6小时前价格:${price_6_hours_ago}`);
+    log(`${instId}：最新价格:${latest_price}，3小时前价格:${price_6_hours_ago}`);
     const quote_balance = accountBalance.quote_balance;
     const frozenBal = accountBalance.frozenBal;
     let trade_amount = (quote_balance * 0.3) / latest_price * 10;
-    // ✅ 开多（价格跌 6%）
-    if (latest_price < price_6_hours_ago * 0.945 && quote_balance > 10&&tradingState[instId].position_size==0) {
+    // ✅ 开多（价格涨 2.5%）
+    if (latest_price > price_6_hours_ago * 1.025 && quote_balance > 10&&frozenBal<10) {
         let res = await placeOrder(instId, "buy", trade_amount);
         if (res.data[0].sCode == 0) {
             log(`开多:${JSON.stringify(res)}`);
@@ -204,8 +204,8 @@ async function strategy(instId) {
            log(instId,latest_price,price_6_hours_ago,trade_amount,);
         }
     }
-    // ✅ 开空（价格涨 5%）
-    if (latest_price > price_6_hours_ago * 1.055 && quote_balance > 10&&tradingState[instId].position_size==0) {
+    // ✅ 开空（价格跌 2.5%）
+    if (latest_price < price_6_hours_ago * 0.975 && quote_balance > 10&&frozenBal<10) {
         let res = await placeOrder(instId, "sell", trade_amount);
         if (res.data[0].sCode == 0) {
             log(`开空:${JSON.stringify(res)}`);
@@ -220,19 +220,39 @@ async function strategy(instId) {
         tradingState[instId].position_size = 0;
         return;
     }
-    // ✅ 盈利 40% 平仓
+    // ✅ 止盈 35% 平仓
     if (tradingState[instId].position_side === "long" && latest_price >= tradingState[instId].last_order_price * 1.035 && frozenBal > 10) {
         let res = await getPositions(instId);
         let availPos=res.data.find(b=>b.availPos>1)?.availPos||0;
-       if(availPos>1){
-        await closePosition(instId, availPos);
-        tradingState[instId].position_size = 0;
-       }
+        if(availPos>1){
+            await closePosition(instId, availPos);
+            tradingState[instId].position_size = 0;
+        }
+    }
+    // ✅ 止损 5% 平仓（多仓）
+    if (tradingState[instId].position_side === "long" && latest_price <= tradingState[instId].last_order_price * 0.95 && frozenBal > 10) {
+        let res = await getPositions(instId);
+        let availPos=res.data.find(b=>b.availPos>1)?.availPos||0;
+        if(availPos>1){
+            log(`触发止损：多仓价格下跌超过5%`);
+            await closePosition(instId, availPos);
+            tradingState[instId].position_size = 0;
+        }
     }
     if (tradingState[instId].position_side === "short" && latest_price <= tradingState[instId].last_order_price * 0.965 && frozenBal > 10) {
         let res = await getPositions(instId);
         let availPos=res.data.find(b=>b.availPos>1)?.availPos||0;
         if(availPos>1){
+            await closePosition(instId, availPos);
+            tradingState[instId].position_size = 0;
+        }
+    }
+    // ✅ 止损 5% 平仓（空仓）
+    if (tradingState[instId].position_side === "short" && latest_price >= tradingState[instId].last_order_price * 1.05 && frozenBal > 10) {
+        let res = await getPositions(instId);
+        let availPos=res.data.find(b=>b.availPos>1)?.availPos||0;
+        if(availPos>1){
+            log(`触发止损：空仓价格上涨超过5%`);
             await closePosition(instId, availPos);
             tradingState[instId].position_size = 0;
         }

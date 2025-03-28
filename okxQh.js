@@ -164,6 +164,12 @@ async function updateAccountBalance() {
         console.error("❌ 更新账户余额失败:", error);
     }
 }
+async function checkPosition(){
+    let res = await getPositions();
+    res.data.forEach(b=>{
+       log(`${b.instId}：持仓数量:${b.availPos},开仓价格:${b.avgPx},当前价格:${b.markPx}`);
+    });
+}
 // 获取持仓数据
 async function getPositions(instId) {
     const path = `/api/v5/account/positions`;
@@ -193,6 +199,11 @@ async function strategy(instId) {
     const quote_balance = accountBalance.quote_balance;
     const frozenBal = accountBalance.frozenBal;
     let trade_amount = (quote_balance * 0.3) / latest_price * 10;
+    if(accountBalance.frozenBal<80){
+        tradingState[instId].position_side = "";
+        tradingState[instId].position_size = 0;
+        return;
+    }
     // ✅ 开多（价格涨 2.5%）
     if (latest_price > price_6_hours_ago * 1.025 && quote_balance > 10&&frozenBal<10) {
         let res = await placeOrder(instId, "buy", trade_amount);
@@ -215,11 +226,6 @@ async function strategy(instId) {
             log(instId,latest_price,price_6_hours_ago,trade_amount,frozenBal);
         }
     }
-    if(accountBalance.frozenBal<80){
-        tradingState[instId].position_side = "";
-        tradingState[instId].position_size = 0;
-        return;
-    }
     // ✅ 止盈 35% 平仓
     if (tradingState[instId].position_side === "long" && latest_price >= tradingState[instId].last_order_price * 1.035 && frozenBal > 10) {
         let res = await getPositions(instId);
@@ -230,7 +236,7 @@ async function strategy(instId) {
         }
     }
     // ✅ 止损 5% 平仓（多仓）
-    if (tradingState[instId].position_side === "long" && latest_price <= tradingState[instId].last_order_price * 0.95 && frozenBal > 10) {
+    if (tradingState[instId].position_side === "long" && latest_price <= tradingState[instId].last_order_price * 0.947 && frozenBal > 10) {
         let res = await getPositions(instId);
         let availPos=res.data.find(b=>b.availPos>1)?.availPos||0;
         if(availPos>1){
@@ -248,7 +254,7 @@ async function strategy(instId) {
         }
     }
     // ✅ 止损 5% 平仓（空仓）
-    if (tradingState[instId].position_side === "short" && latest_price >= tradingState[instId].last_order_price * 1.05 && frozenBal > 10) {
+    if (tradingState[instId].position_side === "short" && latest_price >= tradingState[instId].last_order_price * 1.053 && frozenBal > 10) {
         let res = await getPositions(instId);
         let availPos=res.data.find(b=>b.availPos>1)?.availPos||0;
         if(availPos>1){
@@ -303,6 +309,7 @@ async function closeIPPositionLimit(instId) {
 async function main() {
     while (true) {
         await updateAccountBalance(); // 在每次循环开始时更新账户余额
+        await checkPosition();
         for (const instId of instArr) {
             await strategy(instId);
         }

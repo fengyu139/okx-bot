@@ -158,8 +158,8 @@ async function updateAccountBalance() {
         instArr.forEach(instId => {
             accountBalance[instId] = parseFloat(balance.details.find(b => b.ccy === instId)?.availBal);
         });
-        log(`--------USDT余额:${accountBalance.quote_balance}----------`);
-        log(`--------冻结余额:${accountBalance.frozenBal}----------`);
+        log(`--------USDT余额:${parseInt(accountBalance.quote_balance)}----------`);
+        log(`--------冻结余额:${parseInt(accountBalance.frozenBal)}----------`);
     } catch (error) {
         console.error("❌ 更新账户余额失败:", error);
     }
@@ -167,7 +167,7 @@ async function updateAccountBalance() {
 async function checkPosition(){
     let res = await getPositions();
     res.data.forEach(b=>{
-       log(`${b.instId}：持仓数量:${parseFloat(b.availPos)},开仓价格:${b.avgPx},当前价格:${b.markPx}`);
+       log(`${b.instId}：持仓数量:${parseInt(b.availPos)},开仓价格:${b.avgPx},当前价格:${b.markPx}`);
     });
 }
 // 获取持仓数据
@@ -272,12 +272,12 @@ async function closeIPPositionLimit(instId) {
     
     const path = "/api/v5/trade/order";
     const body = JSON.stringify({
-        instId: instId,
+        instId: `${instId}-USDT`,
         tdMode: "cross",
-        side: "sell",
+        side: "buy",
         ordType: "limit",       // 限价单
         px: currentPrice.toString(), // 以当前市价挂单
-        sz: "98.57133",
+        sz: "3170",
         ccy: "USDT"
     });
 
@@ -304,7 +304,7 @@ async function closeIPPositionLimit(instId) {
         return error.response?.data;
     }
 }
-// closeIPPositionLimit('IP');
+// closeIPPositionLimit('LINK');
 // ✅ 主循环
 async function main() {
     while (true) {

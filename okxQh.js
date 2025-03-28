@@ -167,7 +167,7 @@ async function updateAccountBalance() {
 async function checkPosition(){
     let res = await getPositions();
     res.data.forEach(b=>{
-       log(`${b.instId}：持仓数量:${b.availPos},开仓价格:${b.avgPx},当前价格:${b.markPx}`);
+       log(`${b.instId}：持仓数量:${parseFloat(b.availPos)},开仓价格:${b.avgPx},当前价格:${b.markPx}`);
     });
 }
 // 获取持仓数据

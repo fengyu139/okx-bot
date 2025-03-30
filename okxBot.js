@@ -116,6 +116,7 @@ async function runStrategyForPair(coin, usdtBalance) {
         if(res.code == 0) {
             log(`🔴 卖出 ${base_currency}: ${coinBalance}，价格: ${latest_price} ${quote_currency}`);
             state.buyCount = 0;
+            state.last_buy_price = 0;
         } else {
             log(`❌ ${symbol} 卖出失败`);
             log(res);

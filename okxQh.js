@@ -202,10 +202,9 @@ async function strategy(instId) {
     if(accountBalance.frozenBal<80){
         tradingState[instId].position_side = "";
         tradingState[instId].position_size = 0;
-        return;
     }
     // ✅ 开多（价格涨 2.5%）
-    if (latest_price > price_6_hours_ago * 1.025 && quote_balance > 10&&frozenBal<10) {
+    if (latest_price > price_6_hours_ago * 1.025 && quote_balance > 10&&frozenBal<80) {
         let res = await placeOrder(instId, "buy", trade_amount);
         if (res.data[0].sCode == 0) {
             log(`开多:${JSON.stringify(res)}`);
@@ -216,7 +215,7 @@ async function strategy(instId) {
         }
     }
     // ✅ 开空（价格跌 2.5%）
-    if (latest_price < price_6_hours_ago * 0.975 && quote_balance > 10&&frozenBal<10) {
+    if (latest_price < price_6_hours_ago * 0.975 && quote_balance > 10&&frozenBal<80) {
         let res = await placeOrder(instId, "sell", trade_amount);
         if (res.data[0].sCode == 0) {
             log(`开空:${JSON.stringify(res)}`);

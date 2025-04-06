@@ -204,8 +204,8 @@ async function strategy(instId) {
         tradingState[instId].position_size = 0;
     }
     // ✅ 开多（价格涨 2.5%）
-    if (latest_price > price_6_hours_ago * 1.025 && quote_balance > 10&&frozenBal<80) {
-        let res = await placeOrder(instId, "buy", trade_amount);
+    if (latest_price > price_6_hours_ago * 1.03 && quote_balance > 10&&frozenBal<80) {
+        let res = await placeOrder(instId, "sell", trade_amount);
         if (res.data[0].sCode == 0) {
             log(`开多:${JSON.stringify(res)}`);
             tradingState[instId].position_size += trade_amount;
@@ -215,7 +215,7 @@ async function strategy(instId) {
         }
     }
     // ✅ 开空（价格跌 2.5%）
-    if (latest_price < price_6_hours_ago * 0.975 && quote_balance > 10&&frozenBal<80) {
+    if (latest_price < price_6_hours_ago * 0.965 && quote_balance > 10&&frozenBal<80) {
         let res = await placeOrder(instId, "sell", trade_amount);
         if (res.data[0].sCode == 0) {
             log(`开空:${JSON.stringify(res)}`);
@@ -244,7 +244,7 @@ async function strategy(instId) {
             tradingState[instId].position_size = 0;
         }
     }
-    if (tradingState[instId].position_side === "short" && latest_price <= tradingState[instId].last_order_price * 0.965 && frozenBal > 10) {
+    if (tradingState[instId].position_side === "short" && latest_price <= tradingState[instId].last_order_price * 0.975 && frozenBal > 10) {
         let res = await getPositions(instId);
         let availPos=res.data.find(b=>b.availPos>1)?.availPos||0;
         if(availPos>1){

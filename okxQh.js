@@ -63,7 +63,7 @@ async function getPrice(instId) {
 
 // ✅ 获取历史 K 线数据
 async function getKlines(instId) {
-    const url = `${BASE_URL}/api/v5/market/candles?instId=${instId}-USDT&bar=1H&limit=4`;
+    const url = `${BASE_URL}/api/v5/market/candles?instId=${instId}-USDT&bar=1H&limit=6`;
     const response = await axios.get(url);
     return response.data.data.map(k => parseFloat(k[4])); // 取收盘价
 }

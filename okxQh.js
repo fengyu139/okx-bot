@@ -198,14 +198,14 @@ async function strategy(instId) {
     log(`${instId}：最新价格:${latest_price}，3小时前价格:${price_6_hours_ago}`);
     const quote_balance = accountBalance.quote_balance;
     const frozenBal = accountBalance.frozenBal;
-    let trade_amount = (quote_balance * 0.3) / latest_price * 10;
+    let trade_amount = quote_balance / 0.4  * 10;
     if(accountBalance.frozenBal<80){
         tradingState[instId].position_side = "";
         tradingState[instId].position_size = 0;
     }
     // ✅ 开多（价格涨 2.5%）
-    if (latest_price > price_6_hours_ago * 1.03 && quote_balance > 10&&frozenBal<80) {
-        let res = await placeOrder(instId, "sell", trade_amount);
+    if (latest_price < price_6_hours_ago * 0.945 && quote_balance > 10&&frozenBal<80) {
+        let res = await placeOrder(instId, "buy", trade_amount);
         if (res.data[0].sCode == 0) {
             log(`开多:${JSON.stringify(res)}`);
             tradingState[instId].position_size += trade_amount;
@@ -215,7 +215,7 @@ async function strategy(instId) {
         }
     }
     // ✅ 开空（价格跌 2.5%）
-    if (latest_price < price_6_hours_ago * 0.965 && quote_balance > 10&&frozenBal<80) {
+    if (latest_price > price_6_hours_ago * 1.055 && quote_balance > 10&&frozenBal<80) {
         let res = await placeOrder(instId, "sell", trade_amount);
         if (res.data[0].sCode == 0) {
             log(`开空:${JSON.stringify(res)}`);

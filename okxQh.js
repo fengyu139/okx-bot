@@ -198,7 +198,7 @@ async function strategy(instId) {
     log(`${instId}：最新价格:${latest_price}，3小时前价格:${price_6_hours_ago}`);
     const quote_balance = accountBalance.quote_balance;
     const frozenBal = accountBalance.frozenBal;
-    let trade_amount = quote_balance / 0.4  * 10;
+    let trade_amount = quote_balance * 0.4  * 10;
     if(accountBalance.frozenBal<80){
         tradingState[instId].position_side = "";
         tradingState[instId].position_size = 0;

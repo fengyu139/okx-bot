@@ -60,8 +60,6 @@ async function runStrategyForPair(coin, usdtBalance) {
         return;
     }
     const lastPrice = parseFloat(ticker.data[0].last);
-    log(`📈 当前 ${coin} 价格: ${lastPrice} USDT`);
-
     // 获取账户余额
     const balance = await getBalance();
     if (!balance || !balance.data || balance.data.length === 0) {
@@ -70,8 +68,9 @@ async function runStrategyForPair(coin, usdtBalance) {
     }
     
     const coinBalance = balance.data[0].details.find(b => b.ccy === coin)?.availBal || 0;
+   if(coinBalance >0){
     log(`💰 ${coin} 余额: ${parseFloat(coinBalance).toFixed(4)}`);
-
+   }
     // 获取最近 6 根 1 小时 K 线的收盘价
     const bars = await getCandles(symbol);
     const close_prices = bars.data.slice(0,6).map(b => parseFloat(b[4]));
@@ -94,8 +93,6 @@ async function runStrategyForPair(coin, usdtBalance) {
     } else if(state.buyCount == 2) {
         trade_amount = (usdtBalance * 0.9) / latest_price;
     }
-    
-    log(`${symbol} K线: ${JSON.stringify(close_prices)}`);
     
     // 趋势判断：过去 6 小时价格是否跌幅超过 5%
     if (latest_price < price_6_hours_ago * 0.94 && usdtBalance > 10) {
@@ -153,7 +150,6 @@ async function runStrategy() {
         
         // 为每个交易对执行策略
         for (const coin of tradingPairs) {
-            log(`🔄 开始处理 ${coin}-USDT 交易对`);
             await runStrategyForPair(coin, availableUsdtPerPair);
             // 添加短暂延迟，避免API请求过于频繁
             await new Promise(resolve => setTimeout(resolve, 1000));

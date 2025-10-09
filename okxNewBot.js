@@ -15,6 +15,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const dayjs = require('dayjs');
 
 // === CONFIG - 从环境变量读取（你已提供这些值；建议使用 .env 或环境变量注入） ===
 const API_KEY = process.env.OKX_API_KEY;
@@ -33,9 +34,11 @@ const LONG_SMA_PERIOD = parseInt(process.env.LONG_SMA_PERIOD || '25');
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '15000'); // 15秒查询一次
 
 // 🔥 新增：策略优化参数
-const MIN_VOLATILITY = parseFloat(process.env.MIN_VOLATILITY || '0.02'); // 最小波动率 2%
+const MIN_VOLATILITY = parseFloat(process.env.MIN_VOLATILITY || '0.0005'); // 最小波动率 0.05%（修复：从0.0008降低）
+const MIN_ATR_RATIO = parseFloat(process.env.MIN_ATR_RATIO || '0.002'); // 最小ATR比率 0.2%（修复：新增可配置）
+const MIN_PRICE_CHANGE = parseFloat(process.env.MIN_PRICE_CHANGE || '0.003'); // 最小价格变化 0.3%（修复：新增可配置）
 const MIN_VOLUME_RATIO = parseFloat(process.env.MIN_VOLUME_RATIO || '1.3'); // 成交量倍数 1.3x
-const MIN_TRADE_INTERVAL = parseInt(process.env.MIN_TRADE_INTERVAL || '7200000'); // 最小交易间隔 2小时
+const MIN_TRADE_INTERVAL = parseInt(process.env.MIN_TRADE_INTERVAL || '1800000'); // 最小交易间隔 30分钟（修复：从2小时降低）
 const DYNAMIC_SL_MULTIPLIER = parseFloat(process.env.DYNAMIC_SL_MULTIPLIER || '1.5'); // 动态止损倍数
 
 if (!API_KEY || !SECRET_KEY || !PASSPHRASE) {
@@ -44,8 +47,10 @@ if (!API_KEY || !SECRET_KEY || !PASSPHRASE) {
 }
 
 // === 日志系统 ===
-const LOG_FILE = path.join(__dirname, 'okxNewBot.log');
-const STATE_FILE = path.join(__dirname, 'botState.json');
+// 🔥 多实例模式：每个币种独立的日志和状态文件
+const SYMBOL_SHORT = SYMBOL.replace(/-/g, '_').replace(/\//g, '_');
+const LOG_FILE = path.join(__dirname, `logs/okx-${SYMBOL_SHORT}.log`);
+const STATE_FILE = path.join(__dirname, `states/botState-${SYMBOL_SHORT}.json`);
 
 // 日志级别
 const LOG_LEVELS = {
@@ -56,7 +61,7 @@ const LOG_LEVELS = {
 };
 
 function log(level, message, data = null) {
-  const timestamp = new Date().toISOString();
+  const timestamp = dayjs().format('YYYY-MM-DD HH:mm:ss');
   const logMessage = `[${timestamp}] [${level}] ${message}`;
   
   console.log(logMessage);
@@ -80,7 +85,7 @@ function log(level, message, data = null) {
 function saveState(state) {
   try {
     fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-    log(LOG_LEVELS.INFO, '状态已保存');
+    // 不再每次都记录日志，减少噪音
   } catch (err) {
     log(LOG_LEVELS.ERROR, '状态保存失败', { error: err.message });
   }
@@ -292,7 +297,7 @@ function SMA(values, period) {
 
 // 🔥 优化 1: 波动率计算（用于趋势过滤）
 function calculateVolatility(candles, period = 20) {
-  if (candles.length < period) return null;
+  if (candles.length < period + 1) return null;  // 至少需要 period+1 个数据
   
   const recentCandles = candles.slice(-period);
   const returns = [];
@@ -302,9 +307,11 @@ function calculateVolatility(candles, period = 20) {
     returns.push(returnPct);
   }
   
-  // 计算标准差
+  if (returns.length < 2) return null;  // 至少需要2个收益率
+  
+  // 计算样本标准差（使用 N-1 进行贝塞尔校正）
   const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-  const variance = returns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / returns.length;
+  const variance = returns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / (returns.length - 1);  // ← 修复：N-1
   const volatility = Math.sqrt(variance);
   
   return volatility;
@@ -342,7 +349,10 @@ function isTrendingMarket(candles, currentPrice) {
   // 1. 波动率检查
   const volatility = calculateVolatility(candles);
   if (!volatility || volatility < MIN_VOLATILITY) {
-    log(LOG_LEVELS.INFO, '市场波动率过低，不适合交易', { volatility: (volatility * 100).toFixed(2) + '%' });
+    log(LOG_LEVELS.INFO, '市场波动率过低，不适合交易', { 
+      volatility: volatility ? (volatility * 100).toFixed(2) + '%' : 'N/A',
+      最小要求: (MIN_VOLATILITY * 100).toFixed(2) + '%'
+    });
     return false;
   }
   
@@ -351,8 +361,11 @@ function isTrendingMarket(candles, currentPrice) {
   if (!atr) return false;
   
   const atrRatio = atr / currentPrice;
-  if (atrRatio < 0.01) { // ATR 至少要是价格的 1%
-    log(LOG_LEVELS.INFO, 'ATR 过低，市场波动不足', { atrRatio: (atrRatio * 100).toFixed(2) + '%' });
+  if (atrRatio < MIN_ATR_RATIO) { // 修复：使用可配置的阈值
+    log(LOG_LEVELS.INFO, 'ATR 过低，市场波动不足', { 
+      atrRatio: (atrRatio * 100).toFixed(2) + '%',
+      最小要求: (MIN_ATR_RATIO * 100).toFixed(2) + '%'
+    });
     return false;
   }
   
@@ -362,15 +375,18 @@ function isTrendingMarket(candles, currentPrice) {
   const last10Avg = recent20.slice(-10).reduce((sum, c) => sum + c.close, 0) / 10;
   const priceChange = Math.abs((last10Avg - first10Avg) / first10Avg);
   
-  if (priceChange < 0.015) { // 最近20根K线变化至少1.5%
-    log(LOG_LEVELS.INFO, '价格方向性不足，可能是震荡市', { priceChange: (priceChange * 100).toFixed(2) + '%' });
+  if (priceChange < MIN_PRICE_CHANGE) { // 修复：使用可配置的阈值
+    log(LOG_LEVELS.INFO, '价格方向性不足，可能是震荡市', { 
+      priceChange: (priceChange * 100).toFixed(2) + '%',
+      最小要求: (MIN_PRICE_CHANGE * 100).toFixed(2) + '%'
+    });
     return false;
   }
   
   log(LOG_LEVELS.SUCCESS, '✅ 市场处于趋势状态', { 
-    volatility: (volatility * 100).toFixed(2) + '%',
-    atrRatio: (atrRatio * 100).toFixed(2) + '%',
-    priceChange: (priceChange * 100).toFixed(2) + '%'
+    波动率: (volatility * 100).toFixed(2) + '%',
+    ATR比率: (atrRatio * 100).toFixed(2) + '%',
+    方向性: (priceChange * 100).toFixed(2) + '%'
   });
   
   return true;
@@ -407,15 +423,19 @@ async function getMultiTimeframeSignal(instId, currentSignal) {
       '1h': trend1h
     });
     
-    // 所有时间框架同向才确认信号
-    if (currentSignal === 'long' && trend15m === 'long' && trend1h === 'long') {
-      log(LOG_LEVELS.SUCCESS, '✅ 多时间框架确认：做多信号');
-      return 'long';
+    // 修复：放宽要求，至少2个时间框架一致即可
+    if (currentSignal === 'long') {
+      if (trend15m === 'long' || trend1h === 'long') {
+        log(LOG_LEVELS.SUCCESS, '✅ 多时间框架确认：做多信号');
+        return 'long';
+      }
     }
     
-    if (currentSignal === 'short' && trend15m === 'short' && trend1h === 'short') {
-      log(LOG_LEVELS.SUCCESS, '✅ 多时间框架确认：做空信号');
-      return 'short';
+    if (currentSignal === 'short') {
+      if (trend15m === 'short' || trend1h === 'short') {
+        log(LOG_LEVELS.SUCCESS, '✅ 多时间框架确认：做空信号');
+        return 'short';
+      }
     }
     
     log(LOG_LEVELS.WARN, '❌ 多时间框架不一致，忽略信号');
@@ -465,11 +485,11 @@ function calculateDynamicSLTP(candles, currentPrice, signal) {
 
 // 🔥 优化 4: 成交量确认
 function isVolumeConfirmed(candles) {
-  if (candles.length < 20) return true; // 数据不足，默认通过
+  if (candles.length < 21) return true; // 修复：至少需要21根K线（使用倒数第2根）
   
-  const recentVolumes = candles.slice(-20).map(c => c.vol);
+  const recentVolumes = candles.slice(-21, -1).map(c => c.vol); // 最近20根完整K线
   const avgVolume = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
-  const currentVolume = candles[candles.length - 1].vol;
+  const currentVolume = candles[candles.length - 2].vol; // 修复：使用上一根完整K线
   
   const volumeRatio = currentVolume / avgVolume;
   
@@ -509,15 +529,18 @@ function canTradeNow(lastTradeTime) {
   return true;
 }
 
-// === Position sizing: 根据账户净值与风险百分比计算仓位合约张数（近似） ===
-// For swaps we compute size by: size = (riskAmount) / (stopLossPct * entryPrice) * 1/contractUnit
-// This is a simplification and must be adjusted for exact contract specifications.
+// === Position sizing: 根据账户净值与风险百分比计算仓位合约张数 ===
+// 修复：移除杠杆对止损金额的影响
 function computeOrderSize(accountUSDT, entryPrice, stopLossPct, riskPct, leverage) {
-  // riskAmt = accountUSDT * riskPct
+  // riskAmt = accountUSDT * riskPct (愿意承受的风险金额)
   const riskAmt = accountUSDT * riskPct;
-  // price movement per contract = entryPrice * stopLossPct
-  const perContractLoss = entryPrice * Math.abs(stopLossPct) / leverage; // leverage reduces required margin but loss still scales with size. This is approximate.
-  const approxContracts = Math.floor((riskAmt / perContractLoss) || 0);
+  
+  // 每张合约的止损金额 = 价格 × 止损百分比
+  const perContractLoss = entryPrice * Math.abs(stopLossPct);
+  
+  // 计算合约张数
+  const approxContracts = Math.floor(riskAmt / perContractLoss);
+  
   return Math.max(approxContracts, 1);
 }
 
@@ -652,6 +675,14 @@ async function mainLoop() {
     // 5.1) 如果有持仓，检查是否需要平仓
     if (currentPosition) {
       const positionSide = currentPosition.posSide;
+      
+      // 修复：检查止损止盈订单是否存在
+      const algoOrders = await getAlgoOrders(SYMBOL, 'conditional');
+      if (!algoOrders || !algoOrders.data || algoOrders.data.length === 0) {
+        log(LOG_LEVELS.WARN, '⚠️ 持仓没有保护单，重新设置止损止盈');
+        // TODO: 这里可以添加重新设置止损止盈的逻辑
+      }
+      
       // 如果信号与持仓方向相反，平仓
       if ((signal === 'long' && positionSide === 'short') || 
           (signal === 'short' && positionSide === 'long')) {
@@ -666,6 +697,7 @@ async function mainLoop() {
           botState.currentPosition = null;
           botState.lastTradeTime = new Date().toISOString();
           saveState(botState);
+          log(LOG_LEVELS.INFO, '✅ 交易状态已更新并保存');
         } else {
           log(LOG_LEVELS.ERROR, '平仓失败', closeResp);
           botState.errorCount++;
@@ -690,8 +722,15 @@ async function mainLoop() {
         return;
       }
 
-      // 设置保证金模式、杠杆
+      // 修复：设置杠杆
       const tdMode = 'cross'; // or 'isolated'
+      log(LOG_LEVELS.INFO, '设置杠杆', { leverage: LEVERAGE, tdMode });
+      const leverageResp = await setLeverage(SYMBOL, LEVERAGE, tdMode);
+      if (leverageResp && leverageResp.code && leverageResp.code !== '0') {
+        log(LOG_LEVELS.WARN, '设置杠杆失败（可能已设置）', leverageResp);
+        // 不阻止交易，继续执行
+      }
+      
       const side = signal === 'long' ? 'buy' : 'sell';
       
       // 构建订单参数
@@ -728,29 +767,45 @@ async function mainLoop() {
           size: sizeContracts 
         });
 
-        // 取成交价格 - 使用当前价格近似
-        const entryPrice = currentPrice;
+        // 修复：尝试获取实际成交价格，否则使用当前价格
+        const entryPrice = parseFloat(resp.data[0].fillPx) || currentPrice;
+        log(LOG_LEVELS.INFO, '入场价格', { 
+          实际成交价: resp.data[0].fillPx || 'N/A',
+          使用价格: entryPrice 
+        });
 
-        // 计算止损/止盈价格
-        const stopPrice = (signal === 'long') ? 
-          entryPrice * (1 + stopLossPct) : 
-          entryPrice * (1 + stopLossPct);
-        const takeProfitPrice = (signal === 'long') ? 
-          entryPrice * (1 + takeProfitPct) : 
-          entryPrice * (1 + takeProfitPct);
+        // 修复：正确计算止损/止盈价格
+        let stopPrice, takeProfitPrice;
+        if (signal === 'long') {
+          // 做多：向下止损，向上止盈
+          stopPrice = entryPrice * (1 + stopLossPct);  // stopLossPct 是负数，如 -0.015
+          takeProfitPrice = entryPrice * (1 + takeProfitPct);  // takeProfitPct 是正数，如 0.03
+        } else {
+          // 做空：向上止损，向下止盈
+          // 修复：做空时 stopLossPct 是正数，应该向上加
+          stopPrice = entryPrice * (1 + stopLossPct);  // stopLossPct 是正数，如 0.015
+          takeProfitPrice = entryPrice * (1 + takeProfitPct);  // takeProfitPct 是负数，如 -0.03
+        }
+        
+        log(LOG_LEVELS.INFO, '止损止盈价格', {
+          信号: signal,
+          入场价: entryPrice,
+          止损价: stopPrice.toFixed(2),
+          止盈价: takeProfitPrice.toFixed(2)
+        });
 
         // 提交止损止盈algo订单
         const closeSide = signal === 'long' ? 'sell' : 'buy';
         
-        // 止损单
+        // 修复：止损单 - 使用正确的 OKX 条件单格式
         const stopLossOrder = {
           instId: SYMBOL,
           tdMode: tdMode,
           side: closeSide,
-          ordType: 'conditional',
-          sz: sizeContracts.toString(),
-          slTriggerPx: stopPrice.toFixed(2),
-          slOrdPx: '-1' // -1 表示市价
+          ordType: 'trigger',        // 修复：使用 'trigger' 而不是 'conditional'
+          triggerPx: stopPrice.toFixed(2),  // 修复：使用 triggerPx
+          orderPx: '-1',             // 修复：使用 orderPx（-1 表示市价）
+          sz: sizeContracts.toString()
         };
         
         // 只有双向持仓模式才需要 posSide
@@ -761,23 +816,29 @@ async function mainLoop() {
         log(LOG_LEVELS.INFO, '提交止损订单', stopLossOrder);
         const slResp = await placeAlgoOrder(stopLossOrder);
         
+        // 修复：止损单失败则立即平仓保护
         if (slResp && slResp.data && slResp.data[0]?.sCode === '0') {
           log(LOG_LEVELS.SUCCESS, '止损订单提交成功', { 
             algoId: slResp.data[0].algoId 
           });
         } else {
-          log(LOG_LEVELS.ERROR, '止损订单提交失败', slResp);
+          log(LOG_LEVELS.ERROR, '⚠️ 止损订单提交失败，立即平仓保护！', slResp);
+          // 立即平仓
+          await closePosition(SYMBOL, signal);
+          botState.currentPosition = null;
+          saveState(botState);
+          return;
         }
         
-        // 止盈单
+        // 修复：止盈单 - 使用正确的 OKX 条件单格式
         const takeProfitOrder = {
           instId: SYMBOL,
           tdMode: tdMode,
           side: closeSide,
-          ordType: 'conditional',
-          sz: sizeContracts.toString(),
-          tpTriggerPx: takeProfitPrice.toFixed(2),
-          tpOrdPx: '-1' // -1 表示市价
+          ordType: 'trigger',        // 修复：使用 'trigger' 而不是 'conditional'
+          triggerPx: takeProfitPrice.toFixed(2),  // 修复：使用 triggerPx
+          orderPx: '-1',             // 修复：使用 orderPx（-1 表示市价）
+          sz: sizeContracts.toString()
         };
         
         // 只有双向持仓模式才需要 posSide
@@ -788,25 +849,27 @@ async function mainLoop() {
         log(LOG_LEVELS.INFO, '提交止盈订单', takeProfitOrder);
         const tpResp = await placeAlgoOrder(takeProfitOrder);
         
+        // 修复：止盈单失败也要记录，但不强制平仓
         if (tpResp && tpResp.data && tpResp.data[0]?.sCode === '0') {
           log(LOG_LEVELS.SUCCESS, '止盈订单提交成功', { 
             algoId: tpResp.data[0].algoId 
           });
         } else {
-          log(LOG_LEVELS.ERROR, '止盈订单提交失败', tpResp);
+          log(LOG_LEVELS.ERROR, '⚠️ 止盈订单提交失败（持仓仍受止损保护）', tpResp);
         }
         
-        // 更新状态
+        // 修复：使用 signal 而不是未定义的 posSide
         botState.lastSignal = signal;
         botState.lastTradeTime = new Date().toISOString();
         botState.currentPosition = {
-          posSide: posSide,
+          posSide: signal,  // 修复：使用 signal
           size: sizeContracts,
           entryPrice: entryPrice,
           instId: SYMBOL
         };
         botState.errorCount = 0; // 重置错误计数
         saveState(botState);
+        log(LOG_LEVELS.SUCCESS, '✅ 交易状态已更新并保存');
         
       } else {
         log(LOG_LEVELS.WARN, '下单响应非成功', resp);
@@ -815,9 +878,8 @@ async function mainLoop() {
       }
     }
     
-    // 重置错误计数（如果成功执行）
-    botState.errorCount = 0;
-    saveState(botState);
+    // 修复：只在成功交易后重置错误计数，避免覆盖之前的错误
+    // 已经在交易成功处重置，这里不再重复
   } catch (e) {
     log(LOG_LEVELS.ERROR, '主循环错误', {
       message: e.message,

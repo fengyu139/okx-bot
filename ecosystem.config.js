@@ -17,6 +17,23 @@ module.exports = {
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
       max_memory_restart: '300M'
     },
+    {
+      name: 'okx-bot-doge',
+      script: './okxNewBot.js',
+      env: {
+        SYMBOL: 'DOGE-USDT-SWAP',
+        STARTING_CAPITAL: '2000',
+        RISK_PER_TRADE: '0.01',
+        LEVERAGE: '10',
+        SHORT_SMA_PERIOD: '7',
+        LONG_SMA_PERIOD: '25',
+        POLL_INTERVAL_MS: '15000'
+      },
+      error_file: './logs/doge-error.log',
+      out_file: './logs/doge-out.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+      max_memory_restart: '300M'
+    },
     // {
     //   name: 'okx-bot-eth',
     //   script: './okxNewBot.js',

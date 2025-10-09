@@ -5,6 +5,11 @@ logs
 app.log
 tradingBot.log
 okxLeverageBot.log
+okxNewBot.log
+okx-*.log
+*.log
+states
+botState*.json
 uploads
 dist-ssr
 .env

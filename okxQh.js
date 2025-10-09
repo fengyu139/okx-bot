@@ -10,7 +10,7 @@ const API_SECRET = process.env.OKX_SECRET_KEY;
 const API_PASSPHRASE = process.env.OKX_PASSPHRASE;
 const BASE_URL = process.env.OKX_BASE_URL;
 //'BTC', 'ETH', 'LINK', 'XRP','TRUMP','DOGE','PEPE'
-const instArr = ['ETH', 'LINK', 'XRP','TRUMP','DOGE','PEPE','IP','SOL','TON','FIL','DOT','XAUT','SHIB']; // 支持的币种数组
+const instArr = ['XRP','PEPE',]; // 支持的币种数组
 
 // 动态初始化交易状态
 let tradingState = {};
@@ -273,10 +273,10 @@ async function closeIPPositionLimit(instId) {
     const body = JSON.stringify({
         instId: `${instId}-USDT`,
         tdMode: "cross",
-        side: "buy",
-        ordType: "limit",       // 限价单
+        side: "sell",
+        ordType: "market",       // 限价单
         px: currentPrice.toString(), // 以当前市价挂单
-        sz: "3170",
+        sz: "4660",
         ccy: "USDT"
     });
 
@@ -303,7 +303,22 @@ async function closeIPPositionLimit(instId) {
         return error.response?.data;
     }
 }
-// closeIPPositionLimit('LINK');
+async function getPendingOrders(instId) {
+    const path = `/api/v5/trade/orders-pending?instType=SPOT&instId=${instId}-USDT`;
+    const { timestamp, signature } = signRequest("GET", path);
+    const headers = {
+        "OK-ACCESS-KEY": API_KEY,
+        "OK-ACCESS-SIGN": signature,
+        "OK-ACCESS-TIMESTAMP": timestamp,
+        "OK-ACCESS-PASSPHRASE": API_PASSPHRASE,
+    };
+    const response = await axios.get(`${BASE_URL}${path}`, { headers });
+    console.log(response.data);
+    return response.data;
+}
+
+// getPendingOrders('PEOPLE');
+// closeIPPositionLimit('XRP');
 // ✅ 主循环
 async function main() {
     while (true) {

@@ -941,7 +941,6 @@ process.on('uncaughtException', (error) => {
 // 启动定时轮询
 log(LOG_LEVELS.INFO, '========================================');
 log(LOG_LEVELS.INFO, '启动 OKX 交易机器人');
-log(LOG_LEVELS.INFO, '注意：先用 sandbox keys 测试！');
 log(LOG_LEVELS.INFO, '========================================');
 
 // 初始化：检测账户持仓模式

@@ -85,9 +85,9 @@ function log(level, message, data = null) {
 function saveState(state) {
   try {
     fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-    // 不再每次都记录日志，减少噪音
+    // 静默保存，不输出日志
   } catch (err) {
-    log(LOG_LEVELS.ERROR, '状态保存失败', { error: err.message });
+    log(LOG_LEVELS.ERROR, '❌ 状态保存失败', { error: err.message });
   }
 }
 
@@ -417,28 +417,23 @@ async function getMultiTimeframeSignal(instId, currentSignal) {
     const trend15m = short15m > long15m ? 'long' : 'short';
     const trend1h = short1h > long1h ? 'long' : 'short';
     
-    log(LOG_LEVELS.INFO, '多时间框架分析', {
-      '1m': currentSignal,
-      '15m': trend15m,
-      '1h': trend1h
-    });
-    
     // 修复：放宽要求，至少2个时间框架一致即可
+    // 静默分析，只在确认成功时输出日志
     if (currentSignal === 'long') {
       if (trend15m === 'long' || trend1h === 'long') {
-        log(LOG_LEVELS.SUCCESS, '✅ 多时间框架确认：做多信号');
+        log(LOG_LEVELS.SUCCESS, `✅ 多时间框架确认：做多 (1m:${currentSignal}, 15m:${trend15m}, 1h:${trend1h})`);
         return 'long';
       }
     }
     
     if (currentSignal === 'short') {
       if (trend15m === 'short' || trend1h === 'short') {
-        log(LOG_LEVELS.SUCCESS, '✅ 多时间框架确认：做空信号');
+        log(LOG_LEVELS.SUCCESS, `✅ 多时间框架确认：做空 (1m:${currentSignal}, 15m:${trend15m}, 1h:${trend1h})`);
         return 'short';
       }
     }
     
-    log(LOG_LEVELS.WARN, '❌ 多时间框架不一致，忽略信号');
+    log(LOG_LEVELS.WARN, `❌ 多时间框架不一致 (1m:${currentSignal}, 15m:${trend15m}, 1h:${trend1h})`);
     return null;
     
   } catch (err) {
@@ -473,13 +468,7 @@ function calculateDynamicSLTP(candles, currentPrice, signal) {
   const stopLossPct = signal === 'long' ? -stopLossRatio : stopLossRatio;
   const takeProfitPct = signal === 'long' ? takeProfitRatio : -takeProfitRatio;
   
-  log(LOG_LEVELS.INFO, '动态止损止盈', {
-    ATR: atr.toFixed(2),
-    stopLoss: (Math.abs(stopLossPct) * 100).toFixed(2) + '%',
-    takeProfit: (Math.abs(takeProfitPct) * 100).toFixed(2) + '%',
-    盈亏比: '2:1'
-  });
-  
+  // 静默计算止损止盈，不输出日志
   return { stopLossPct, takeProfitPct };
 }
 
@@ -574,7 +563,7 @@ async function mainLoop() {
     let usdtAvailable = STARTING_CAPITAL;
     if (balances && balances.length) {
       // 找到 currency 为 USDT 的对象
-      const obj = balances.find(x => x.ccy === 'USDT');
+      const obj = balances[0].details.find(x => x.ccy === 'USDT');
       if (obj) {
         usdtAvailable = parseFloat(obj.availBal || obj.details?.[0]?.availBal || obj.eq) || usdtAvailable;
       }
@@ -589,13 +578,7 @@ async function mainLoop() {
         return p.instId === SYMBOL && parseFloat(p.pos) !== 0;
       });
       if (currentPosition) {
-        log(LOG_LEVELS.INFO, '当前持仓', {
-          posSide: currentPosition.posSide,
-          pos: currentPosition.pos,
-          avgPx: currentPosition.avgPx,
-          upl: currentPosition.upl,
-          uplRatio: currentPosition.uplRatio
-        });
+        // 静默记录持仓信息，不输出日志（减少噪音）
         botState.currentPosition = {
           posSide: currentPosition.posSide,
           pos: parseFloat(currentPosition.pos),
@@ -624,7 +607,7 @@ async function mainLoop() {
     const currentPrice = priceHistory[priceHistory.length - 1];
 
     if (!shortSMA || !longSMA) {
-      log(LOG_LEVELS.INFO, '等待足够数据计算 SMA...');
+      // 静默等待数据，不输出日志
       return;
     }
 
@@ -676,37 +659,32 @@ async function mainLoop() {
     if (currentPosition) {
       const positionSide = currentPosition.posSide;
       
-      // 修复：检查止损止盈订单是否存在
-      const algoOrders = await getAlgoOrders(SYMBOL, 'conditional');
+      // 修复：检查止损止盈订单是否存在（静默检查）
+      const algoOrders = await getAlgoOrders(SYMBOL, 'trigger');
       if (!algoOrders || !algoOrders.data || algoOrders.data.length === 0) {
-        log(LOG_LEVELS.WARN, '⚠️ 持仓没有保护单，重新设置止损止盈');
+        log(LOG_LEVELS.WARN, '⚠️ 持仓没有保护单');
         // TODO: 这里可以添加重新设置止损止盈的逻辑
       }
       
       // 如果信号与持仓方向相反，平仓
       if ((signal === 'long' && positionSide === 'short') || 
           (signal === 'short' && positionSide === 'long')) {
-        log(LOG_LEVELS.INFO, '信号反转，平仓当前持仓', { 
-          currentSide: positionSide, 
-          newSignal: signal 
-        });
+        log(LOG_LEVELS.INFO, `🔄 信号反转: ${positionSide} → ${signal}，平仓中...`);
         
         const closeResp = await closePosition(SYMBOL, positionSide);
         if (closeResp && closeResp.data && closeResp.data[0]?.sCode === '0') {
-          log(LOG_LEVELS.SUCCESS, '平仓成功', { ordId: closeResp.data[0].ordId });
+          log(LOG_LEVELS.SUCCESS, `✅ 平仓成功: ${positionSide} 已平仓`);
           botState.currentPosition = null;
           botState.lastTradeTime = new Date().toISOString();
           saveState(botState);
-          log(LOG_LEVELS.INFO, '✅ 交易状态已更新并保存');
         } else {
-          log(LOG_LEVELS.ERROR, '平仓失败', closeResp);
+          log(LOG_LEVELS.ERROR, '❌ 平仓失败', closeResp);
           botState.errorCount++;
           saveState(botState);
           return;
         }
       } else {
-        // 持仓方向与信号一致或信号为hold，不操作
-        log(LOG_LEVELS.INFO, '保持当前持仓');
+        // 持仓方向与信号一致或信号为hold，不操作（静默）
         return;
       }
     }
@@ -722,13 +700,11 @@ async function mainLoop() {
         return;
       }
 
-      // 修复：设置杠杆
+      // 修复：设置杠杆（静默设置）
       const tdMode = 'cross'; // or 'isolated'
-      log(LOG_LEVELS.INFO, '设置杠杆', { leverage: LEVERAGE, tdMode });
       const leverageResp = await setLeverage(SYMBOL, LEVERAGE, tdMode);
       if (leverageResp && leverageResp.code && leverageResp.code !== '0') {
-        log(LOG_LEVELS.WARN, '设置杠杆失败（可能已设置）', leverageResp);
-        // 不阻止交易，继续执行
+        // 静默处理，可能已设置过杠杆
       }
       
       const side = signal === 'long' ? 'buy' : 'sell';
@@ -745,12 +721,12 @@ async function mainLoop() {
       // 🔧 关键修改：只有在双向持仓模式下才添加 posSide 参数
       if (posMode === 'long_short_mode') {
         order.posSide = signal; // 'long' or 'short'
-        log(LOG_LEVELS.INFO, '使用双向持仓模式', { posMode, posSide: signal });
-      } else {
-        log(LOG_LEVELS.INFO, '使用单向持仓模式（不传posSide参数）', { posMode });
       }
 
-      log(LOG_LEVELS.INFO, '下市价单', order);
+      log(LOG_LEVELS.INFO, `📤 下${signal === 'long' ? '多' : '空'}单: ${sizeContracts}张 @ ${currentPrice.toFixed(6)}`, {
+        持仓模式: posMode === 'long_short_mode' ? '双向' : '单向',
+        保证金模式: tdMode
+      });
       const resp = await placeOrder(order);
       
       if (resp && resp.error) {
@@ -787,12 +763,7 @@ async function mainLoop() {
           takeProfitPrice = entryPrice * (1 + takeProfitPct);  // takeProfitPct 是负数，如 -0.03
         }
         
-        log(LOG_LEVELS.INFO, '止损止盈价格', {
-          信号: signal,
-          入场价: entryPrice,
-          止损价: stopPrice.toFixed(2),
-          止盈价: takeProfitPrice.toFixed(2)
-        });
+        // 静默计算止损止盈价格
 
         // 提交止损止盈algo订单
         const closeSide = signal === 'long' ? 'sell' : 'buy';
@@ -813,14 +784,11 @@ async function mainLoop() {
           stopLossOrder.posSide = signal;
         }
         
-        log(LOG_LEVELS.INFO, '提交止损订单', stopLossOrder);
         const slResp = await placeAlgoOrder(stopLossOrder);
         
         // 修复：止损单失败则立即平仓保护
         if (slResp && slResp.data && slResp.data[0]?.sCode === '0') {
-          log(LOG_LEVELS.SUCCESS, '止损订单提交成功', { 
-            algoId: slResp.data[0].algoId 
-          });
+          log(LOG_LEVELS.SUCCESS, `✅ 止损单已设置 @ ${stopPrice.toFixed(6)}`);
         } else {
           log(LOG_LEVELS.ERROR, '⚠️ 止损订单提交失败，立即平仓保护！', slResp);
           // 立即平仓
@@ -846,14 +814,11 @@ async function mainLoop() {
           takeProfitOrder.posSide = signal;
         }
         
-        log(LOG_LEVELS.INFO, '提交止盈订单', takeProfitOrder);
         const tpResp = await placeAlgoOrder(takeProfitOrder);
         
         // 修复：止盈单失败也要记录，但不强制平仓
         if (tpResp && tpResp.data && tpResp.data[0]?.sCode === '0') {
-          log(LOG_LEVELS.SUCCESS, '止盈订单提交成功', { 
-            algoId: tpResp.data[0].algoId 
-          });
+          log(LOG_LEVELS.SUCCESS, `✅ 止盈单已设置 @ ${takeProfitPrice.toFixed(6)}`);
         } else {
           log(LOG_LEVELS.ERROR, '⚠️ 止盈订单提交失败（持仓仍受止损保护）', tpResp);
         }
@@ -869,7 +834,6 @@ async function mainLoop() {
         };
         botState.errorCount = 0; // 重置错误计数
         saveState(botState);
-        log(LOG_LEVELS.SUCCESS, '✅ 交易状态已更新并保存');
         
       } else {
         log(LOG_LEVELS.WARN, '下单响应非成功', resp);
@@ -940,40 +904,28 @@ process.on('uncaughtException', (error) => {
 
 // 启动定时轮询
 log(LOG_LEVELS.INFO, '========================================');
-log(LOG_LEVELS.INFO, '启动 OKX 交易机器人');
+log(LOG_LEVELS.INFO, '🤖 OKX 交易机器人启动中...');
 log(LOG_LEVELS.INFO, '========================================');
 
 // 初始化：检测账户持仓模式
 async function initBot() {
   try {
-    log(LOG_LEVELS.INFO, '正在检测账户配置...');
     const config = await getAccountConfig();
     
     if (config && config.data && config.data.length > 0) {
       posMode = config.data[0].posMode || 'net_mode';
-      log(LOG_LEVELS.INFO, '账户持仓模式检测成功', { 
-        posMode: posMode,
-        description: posMode === 'long_short_mode' ? '双向持仓（支持同时多空）' : '单向持仓（买卖平仓）'
-      });
+      log(LOG_LEVELS.INFO, `✅ 持仓模式: ${posMode === 'long_short_mode' ? '双向' : '单向'}`);
     } else {
-      log(LOG_LEVELS.WARN, '无法检测持仓模式，使用默认：单向持仓模式');
+      log(LOG_LEVELS.WARN, '⚠️ 使用默认持仓模式: 单向');
     }
   } catch (err) {
-    log(LOG_LEVELS.WARN, '账户配置检测失败，使用默认：单向持仓模式', { error: err.message });
+    log(LOG_LEVELS.WARN, '⚠️ 账户配置检测失败，使用默认: 单向持仓');
   }
 
-  log(LOG_LEVELS.INFO, '配置信息', {
-    symbol: SYMBOL,
-    leverage: LEVERAGE,
-    riskPerTrade: `${(RISK_PER_TRADE * 100).toFixed(2)}%`,
-    shortSMA: SHORT_SMA_PERIOD,
-    longSMA: LONG_SMA_PERIOD,
-    pollInterval: `${POLL_INTERVAL_MS / 1000}秒`,
-    posMode: posMode
-  });
+  log(LOG_LEVELS.INFO, `📊 ${SYMBOL} | 杠杆${LEVERAGE}x | 风险${(RISK_PER_TRADE * 100).toFixed(1)}% | SMA(${SHORT_SMA_PERIOD},${LONG_SMA_PERIOD})`);
 
   if (botState.currentPosition) {
-    log(LOG_LEVELS.INFO, '恢复的持仓状态', botState.currentPosition);
+    log(LOG_LEVELS.INFO, `📌 恢复持仓: ${botState.currentPosition.posSide} ${botState.currentPosition.size}张 @ ${botState.currentPosition.entryPrice}`);
   }
 
   // 开始主循环

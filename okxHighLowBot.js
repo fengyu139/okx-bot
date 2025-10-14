@@ -26,7 +26,7 @@ const PASSPHRASE = process.env.OKX_PASSPHRASE;
 const BASE_URL = process.env.OKX_BASE_URL || 'https://www.okx.com';
 
 // 策略参数
-const SYMBOL = process.env.SYMBOL || 'DOGE-USDT-SWAP';
+const SYMBOL = process.env.SYMBOL || 'XRP-USDT-SWAP';
 const LEVERAGE = parseInt(process.env.LEVERAGE || '10'); // 10倍杠杆
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '300000'); // 5分钟 = 300000ms
 const LOOKBACK_HOURS = parseInt(process.env.LOOKBACK_HOURS || '12'); // 回溯12小时

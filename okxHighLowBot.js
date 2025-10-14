@@ -31,8 +31,8 @@ const LEVERAGE = parseInt(process.env.LEVERAGE || '10'); // 10倍杠杆
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '300000'); // 5分钟 = 300000ms
 const LOOKBACK_HOURS = parseInt(process.env.LOOKBACK_HOURS || '12'); // 回溯12小时
 const POSITION_SIZE_PCT = parseFloat(process.env.POSITION_SIZE_PCT || '0.5'); // 仓位50%
-const TAKE_PROFIT_PCT = parseFloat(process.env.TAKE_PROFIT_PCT || '0.05'); // 止盈5%
-const STOP_LOSS_PCT = parseFloat(process.env.STOP_LOSS_PCT || '0.03'); // 止损3%
+const TAKE_PROFIT_PCT = parseFloat(process.env.TAKE_PROFIT_PCT || '0.03'); // 止盈5%
+const STOP_LOSS_PCT = parseFloat(process.env.STOP_LOSS_PCT || '0.02'); // 止损3%
 
 if (!API_KEY || !SECRET_KEY || !PASSPHRASE) {
   console.error('❌ 缺少 API 密钥 - 请在环境变量中设置 OKX_API_KEY, OKX_SECRET_KEY, OKX_PASSPHRASE');

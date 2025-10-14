@@ -292,11 +292,11 @@ async function analyzeHighLow(instId) {
     let signal = null;
     
     if (currentPrice >= highThreshold) {
-      log(LOG_LEVELS.SUCCESS, '🔥 触及12小时最高点！准备做多');
-      signal = 'long';
-    } else if (currentPrice <= lowThreshold) {
-      log(LOG_LEVELS.SUCCESS, '❄️ 触及12小时最低点！准备做空');
+      log(LOG_LEVELS.SUCCESS, '🔥 触及12小时最高点！准备做空');
       signal = 'short';
+    } else if (currentPrice <= lowThreshold) {
+      log(LOG_LEVELS.SUCCESS, '❄️ 触及12小时最低点！准备做多');
+      signal = 'long';
     }
     
     return {
@@ -589,7 +589,6 @@ async function mainLoop() {
           slTriggerPx: stopPrice.toFixed(2),
           slOrdPx: '-1',
           sz: coinSize,
-          ccy: 'USDT',
           reduceOnly: true
         }
         
@@ -612,7 +611,6 @@ async function mainLoop() {
           tpTriggerPx: takeProfitPrice.toFixed(2),
           tpOrdPx: '-1',
           sz: coinSize,
-          ccy: 'USDT',
           reduceOnly: true
         }
         

@@ -585,7 +585,6 @@ async function mainLoop() {
           slTriggerPx: stopPrice.toFixed(4),
           slOrdPx: '-1',
           sz: coinSize,
-          ccy: 'USDT',
           reduceOnly: true
         }
         
@@ -608,7 +607,6 @@ async function mainLoop() {
           tpTriggerPx: takeProfitPrice.toFixed(4),
           tpOrdPx: '-1',
           sz: coinSize,
-          ccy: 'USDT',
           reduceOnly: true
         }
         

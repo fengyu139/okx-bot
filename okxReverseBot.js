@@ -1,6 +1,6 @@
 /**
  * okxReverseBot.js
- * OKX K线趋势反转策略机器人
+ * OKX K线趋势反转策略机器人（币币杠杆交易）
  * 
  * 策略说明：
  * 1. 每隔5分钟循环一次
@@ -10,6 +10,8 @@
  * 5. 开仓：10倍杠杆，使用余额的50%
  * 6. 止盈：3%
  * 7. 止损：2%
+ * 
+ * 交易模式：币币杠杆（Margin Trading）
  */
 
 require('dotenv').config();
@@ -26,13 +28,14 @@ const PASSPHRASE = process.env.OKX_PASSPHRASE;
 const BASE_URL = process.env.OKX_BASE_URL || 'https://www.okx.com';
 
 // 策略参数
-const SYMBOL = process.env.SYMBOL || 'ETH-USDT-SWAP';
+const SYMBOL = process.env.SYMBOL || 'ETH-USDT'; // 币币杠杆交易对
 const LEVERAGE = parseInt(process.env.LEVERAGE || '10'); // 10倍杠杆
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '300000'); // 5分钟 = 300000ms
 const KLINE_COUNT = parseInt(process.env.KLINE_COUNT || '5'); // 判断5根K线
 const POSITION_SIZE_PCT = parseFloat(process.env.POSITION_SIZE_PCT || '0.5'); // 仓位50%
 const TAKE_PROFIT_PCT = parseFloat(process.env.TAKE_PROFIT_PCT || '0.03'); // 止盈3%
 const STOP_LOSS_PCT = parseFloat(process.env.STOP_LOSS_PCT || '0.02'); // 止损2%
+const MARGIN_MODE = process.env.MARGIN_MODE || 'cross'; // 保证金模式：cross(全仓) 或 isolated(逐仓)
 
 if (!API_KEY || !SECRET_KEY || !PASSPHRASE) {
   console.error('❌ 缺少 API 密钥 - 请在环境变量中设置 OKX_API_KEY, OKX_SECRET_KEY, OKX_PASSPHRASE');
@@ -41,8 +44,8 @@ if (!API_KEY || !SECRET_KEY || !PASSPHRASE) {
 
 // === 日志系统 ===
 const SYMBOL_SHORT = SYMBOL.replace(/-/g, '_').replace(/\//g, '_');
-const LOG_FILE = path.join(__dirname, `logs/okx-reverse-${SYMBOL_SHORT}.log`);
-const STATE_FILE = path.join(__dirname, `states/botState-reverse-${SYMBOL_SHORT}.json`);
+const LOG_FILE = path.join(__dirname, `logs/okx-reverse-margin-${SYMBOL_SHORT}.log`);
+const STATE_FILE = path.join(__dirname, `states/botState-reverse-margin-${SYMBOL_SHORT}.json`);
 
 const LOG_LEVELS = {
   INFO: 'INFO',
@@ -217,12 +220,8 @@ async function closePosition(instId, posSide) {
     return null;
   }
   
-  let position;
-  if (posMode === 'long_short_mode') {
-    position = posResp.data.find(p => p.instId === instId && p.posSide === posSide);
-  } else {
-    position = posResp.data.find(p => p.instId === instId && parseFloat(p.pos) !== 0);
-  }
+  // 币币杠杆使用单向持仓模式
+  const position = posResp.data.find(p => p.instId === instId && parseFloat(p.pos) !== 0);
   
   if (!position || parseFloat(position.pos) === 0) {
     log(LOG_LEVELS.WARN, '没有找到指定的持仓', { instId, posSide });
@@ -230,24 +229,16 @@ async function closePosition(instId, posSide) {
   }
   
   const posSize = Math.abs(parseFloat(position.pos));
-  let side;
-  if (posMode === 'long_short_mode') {
-    side = posSide === 'long' ? 'sell' : 'buy';
-  } else {
-    side = parseFloat(position.pos) > 0 ? 'sell' : 'buy';
-  }
+  const side = parseFloat(position.pos) > 0 ? 'sell' : 'buy';
   
   const order = {
     instId: instId,
-    tdMode: position.mgnMode || 'cross',
+    tdMode: position.mgnMode || MARGIN_MODE,
     side: side,
     ordType: 'market',
-    sz: posSize.toString()
+    sz: posSize.toString(),
+    ccy: 'USDT' // 保证金币种
   };
-  
-  if (posMode === 'long_short_mode') {
-    order.posSide = posSide;
-  }
   
   log(LOG_LEVELS.INFO, '提交平仓订单', order);
   return await placeOrder(order);
@@ -328,17 +319,28 @@ async function analyzeKlineTrend(instId) {
 }
 
 /**
- * 计算开仓张数
+ * 计算开仓数量（币币杠杆交易）
+ * @param {number} balance - 可用USDT余额
+ * @param {number} price - 当前价格
+ * @param {number} leverage - 杠杆倍数
+ * @param {number} sizePct - 仓位比例
+ * @returns {string} - 返回币的数量（保留4位小数）
  */
 function calculatePositionSize(balance, price, leverage, sizePct) {
+  // 使用账户余额的指定比例
   const capitalToUse = balance * sizePct;
+  
+  // 考虑杠杆后的名义价值（USDT）
   const nominalValue = capitalToUse * leverage;
-  const contractValue = price;
-  const contracts = Math.floor(nominalValue / contractValue);
-  return Math.max(contracts, 1);
+  
+  // 计算可以买入/卖出的币数量
+  const coinAmount = nominalValue / price;
+  
+  // 保留4位小数，确保精度
+  return coinAmount.toFixed(4);
 }
 
-// 全局变量：持仓模式
+// 全局变量：持仓模式（币币杠杆固定为单向持仓）
 let posMode = 'net_mode';
 
 // === 手动止盈止损检查 ===
@@ -502,38 +504,34 @@ async function mainLoop() {
       log(LOG_LEVELS.SUCCESS, `✅ 触发${signal === 'long' ? '做多' : '做空'}信号`);
       
       // 设置杠杆
-      const tdMode = 'cross';
-      await setLeverage(SYMBOL, LEVERAGE, tdMode);
+      await setLeverage(SYMBOL, LEVERAGE, MARGIN_MODE);
       
-      // 计算开仓数量
-      const sizeContracts = calculatePositionSize(usdtAvailable, currentPrice, LEVERAGE, POSITION_SIZE_PCT);
+      // 计算开仓数量（币的数量）
+      const coinSize = calculatePositionSize(usdtAvailable, currentPrice, LEVERAGE, POSITION_SIZE_PCT);
       
       log(LOG_LEVELS.INFO, `📊 开仓参数`, {
         方向: signal === 'long' ? '做多' : '做空',
         杠杆: LEVERAGE + 'x',
+        保证金模式: MARGIN_MODE === 'cross' ? '全仓' : '逐仓',
         使用资金: (usdtAvailable * POSITION_SIZE_PCT).toFixed(2) + ' USDT',
-        合约张数: sizeContracts,
+        币数量: coinSize,
         当前价格: currentPrice.toFixed(4)
       });
       
-      if (sizeContracts <= 0) {
-        log(LOG_LEVELS.WARN, '计算到的合约数量为 0，跳过下单');
+      if (parseFloat(coinSize) <= 0) {
+        log(LOG_LEVELS.WARN, '计算到的币数量为 0，跳过下单');
         return;
       }
       
-      // 构建开仓订单
+      // 构建开仓订单（币币杠杆）
       const side = signal === 'long' ? 'buy' : 'sell';
       const order = {
         instId: SYMBOL,
-        tdMode: tdMode,
+        tdMode: MARGIN_MODE,
         side: side,
         ordType: 'market',
-        sz: sizeContracts.toString(),
-        ccy: 'USDT'
-      };
-      
-      if (posMode === 'long_short_mode') {
-        order.posSide = signal;
+        sz: coinSize,
+        ccy: 'USDT' // 保证金币种
       }
       
       log(LOG_LEVELS.INFO, `📤 提交开仓订单...`);
@@ -550,7 +548,7 @@ async function mainLoop() {
         log(LOG_LEVELS.SUCCESS, '✅ 开仓成功', { 
           ordId: resp.data[0].ordId,
           signal: signal,
-          size: sizeContracts 
+          size: coinSize 
         });
         
         // 获取成交价格
@@ -581,16 +579,14 @@ async function mainLoop() {
         // 设置止损单
         const stopLossOrder = {
           instId: SYMBOL,
-          tdMode: tdMode,
+          tdMode: MARGIN_MODE,
           side: closeSide,
-          ordType: 'trigger',
-          triggerPx: stopPrice.toFixed(4),
-          orderPx: '-1',
-          sz: sizeContracts.toString()
-        };
-        
-        if (posMode === 'long_short_mode') {
-          stopLossOrder.posSide = signal;
+          ordType: 'conditional',
+          slTriggerPx: stopPrice.toFixed(4),
+          slOrdPx: '-1',
+          sz: coinSize,
+          ccy: 'USDT',
+          reduceOnly: true
         }
         
         const slResp = await placeAlgoOrder(stopLossOrder);
@@ -606,16 +602,14 @@ async function mainLoop() {
         // 设置止盈单
         const takeProfitOrder = {
           instId: SYMBOL,
-          tdMode: tdMode,
+          tdMode: MARGIN_MODE,
           side: closeSide,
-          ordType: 'trigger',
-          triggerPx: takeProfitPrice.toFixed(4),
-          orderPx: '-1',
-          sz: sizeContracts.toString()
-        };
-        
-        if (posMode === 'long_short_mode') {
-          takeProfitOrder.posSide = signal;
+          ordType: 'conditional',
+          tpTriggerPx: takeProfitPrice.toFixed(4),
+          tpOrdPx: '-1',
+          sz: coinSize,
+          ccy: 'USDT',
+          reduceOnly: true
         }
         
         const tpResp = await placeAlgoOrder(takeProfitOrder);
@@ -658,7 +652,7 @@ async function mainLoop() {
         botState.lastTradeTime = new Date().toISOString();
         botState.currentPosition = {
           posSide: signal,
-          size: sizeContracts,
+          size: coinSize,
           entryPrice: entryPrice,
           instId: SYMBOL
         };
@@ -733,20 +727,23 @@ async function initBot() {
   try {
     log(LOG_LEVELS.INFO, '========================================');
     log(LOG_LEVELS.INFO, '🤖 OKX K线趋势反转策略机器人启动中...');
+    log(LOG_LEVELS.INFO, '📌 交易模式: 币币杠杆（Margin Trading）');
     log(LOG_LEVELS.INFO, '========================================');
     
-    // 检测账户持仓模式
+    // 检测账户持仓模式（币币杠杆固定为单向持仓）
     const config = await getAccountConfig();
     if (config && config.data && config.data.length > 0) {
       posMode = config.data[0].posMode || 'net_mode';
-      log(LOG_LEVELS.INFO, `✅ 持仓模式: ${posMode === 'long_short_mode' ? '双向' : '单向'}`);
+      log(LOG_LEVELS.INFO, `✅ 账户持仓模式: ${posMode === 'long_short_mode' ? '双向' : '单向'}`);
     } else {
       log(LOG_LEVELS.WARN, '⚠️ 使用默认持仓模式: 单向');
     }
     
     log(LOG_LEVELS.INFO, `📊 策略参数`, {
+      交易类型: '币币杠杆',
       交易对: SYMBOL,
       杠杆: LEVERAGE + 'x',
+      保证金模式: MARGIN_MODE === 'cross' ? '全仓' : '逐仓',
       K线数量: KLINE_COUNT + '根15分钟K线',
       仓位比例: (POSITION_SIZE_PCT * 100) + '%',
       止盈: (TAKE_PROFIT_PCT * 100) + '%',
@@ -756,7 +753,7 @@ async function initBot() {
     });
     
     if (botState.currentPosition) {
-      log(LOG_LEVELS.INFO, `📌 恢复持仓: ${botState.currentPosition.posSide} ${botState.currentPosition.size}张 @ ${botState.currentPosition.entryPrice}`);
+      log(LOG_LEVELS.INFO, `📌 恢复持仓: ${botState.currentPosition.posSide} ${botState.currentPosition.size} 币 @ ${botState.currentPosition.entryPrice}`);
       
       if (botState.manualSLTP && botState.manualSLTP.enabled) {
         log(LOG_LEVELS.WARN, `🔧 手动止盈止损模式已启用`, {

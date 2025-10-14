@@ -528,7 +528,8 @@ async function mainLoop() {
         tdMode: tdMode,
         side: side,
         ordType: 'market',
-        sz: sizeContracts.toString()
+        sz: sizeContracts.toString(),
+        ccy: 'USDT'
       };
       
       if (posMode === 'long_short_mode') {

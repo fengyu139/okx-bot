@@ -715,7 +715,8 @@ async function mainLoop() {
         tdMode: tdMode,
         side: side,
         ordType: 'market',
-        sz: sizeContracts.toString()
+        sz: sizeContracts.toString(),
+        ccy: 'USDT'
       };
       
       // 🔧 关键修改：只有在双向持仓模式下才添加 posSide 参数

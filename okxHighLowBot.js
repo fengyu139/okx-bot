@@ -30,7 +30,7 @@ const SYMBOL = process.env.SYMBOL || 'XRP-USDT-SWAP';
 const LEVERAGE = parseInt(process.env.LEVERAGE || '10'); // 10倍杠杆
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '300000'); // 5分钟 = 300000ms
 const LOOKBACK_HOURS = parseInt(process.env.LOOKBACK_HOURS || '12'); // 回溯12小时
-const POSITION_SIZE_PCT = parseFloat(process.env.POSITION_SIZE_PCT || '0.5'); // 仓位50%
+const POSITION_SIZE_PCT = parseFloat(process.env.POSITION_SIZE_PCT || '0.4'); // 仓位50%
 const TAKE_PROFIT_PCT = parseFloat(process.env.TAKE_PROFIT_PCT || '0.03'); // 止盈5%
 const STOP_LOSS_PCT = parseFloat(process.env.STOP_LOSS_PCT || '0.02'); // 止损3%
 
@@ -242,7 +242,8 @@ async function closePosition(instId, posSide) {
     tdMode: position.mgnMode || 'cross',
     side: side,
     ordType: 'market',
-    sz: posSize.toString()
+    sz: posSize.toString(),
+    ccy: 'USDT'
   };
   
   if (posMode === 'long_short_mode') {

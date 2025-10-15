@@ -589,7 +589,8 @@ async function mainLoop() {
           slTriggerPx: stopPrice.toFixed(2),
           slOrdPx: '-1',
           sz: coinSize*entryPrice,
-          reduceOnly: true
+          reduceOnly: true,
+          ccy: 'USDT',
         }
         
         const slResp = await placeAlgoOrder(stopLossOrder);
@@ -611,7 +612,8 @@ async function mainLoop() {
           tpTriggerPx: takeProfitPrice.toFixed(2),
           tpOrdPx: '-1',
           sz: coinSize*entryPrice,
-          reduceOnly: true
+          reduceOnly: true,
+          ccy: 'USDT'
         }
         
         const tpResp = await placeAlgoOrder(takeProfitOrder);

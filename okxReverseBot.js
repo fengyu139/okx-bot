@@ -464,7 +464,7 @@ async function mainLoop() {
     let currentPosition = null;
     if (positionsResp && positionsResp.data && positionsResp.data.length > 0) {
       currentPosition = positionsResp.data.find(p => {
-        return p.instId === SYMBOL && parseFloat(p.pos) !== 0;
+        return p.instId === SYMBOL && Math.abs(parseFloat(p.pos))>20;
       });
       
       if (currentPosition) {
@@ -584,7 +584,7 @@ async function mainLoop() {
           ordType: 'conditional',
           slTriggerPx: stopPrice.toFixed(4),
           slOrdPx: '-1',
-          sz: coinSize,
+          sz: coinSize*entryPrice,
           reduceOnly: true
         }
         
@@ -606,7 +606,7 @@ async function mainLoop() {
           ordType: 'conditional',
           tpTriggerPx: takeProfitPrice.toFixed(4),
           tpOrdPx: '-1',
-          sz: coinSize,
+          sz: coinSize*entryPrice,
           reduceOnly: true
         }
         

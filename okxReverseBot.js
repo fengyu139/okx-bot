@@ -530,7 +530,7 @@ async function mainLoop() {
         tdMode: MARGIN_MODE,
         side: side,
         ordType: 'market',
-        sz: coinSize,
+        sz: signal =='long'?coinSize*currentPrice:coinSize,
         ccy: 'USDT' // 保证金币种
       }
       
@@ -584,7 +584,7 @@ async function mainLoop() {
           ordType: 'conditional',
           slTriggerPx: stopPrice.toFixed(4),
           slOrdPx: '-1',
-          sz: coinSize*entryPrice,
+          sz: signal =='long'?coinSize:coinSize*entryPrice,
           ccy: 'USDT',
           reduceOnly: true
         }
@@ -607,7 +607,7 @@ async function mainLoop() {
           ordType: 'conditional',
           tpTriggerPx: takeProfitPrice.toFixed(4),
           tpOrdPx: '-1',
-          sz: coinSize*entryPrice,
+          sz: signal =='long'?coinSize:coinSize*entryPrice,
           ccy: 'USDT',
           reduceOnly: true
         }

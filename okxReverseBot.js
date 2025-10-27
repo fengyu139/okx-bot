@@ -31,10 +31,10 @@ const BASE_URL = process.env.OKX_BASE_URL || 'https://www.okx.com';
 const SYMBOL = process.env.SYMBOL || 'ETH-USDT'; // 币币杠杆交易对
 const LEVERAGE = parseInt(process.env.LEVERAGE || '10'); // 10倍杠杆
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '300000'); // 5分钟 = 300000ms
-const KLINE_COUNT = parseInt(process.env.KLINE_COUNT || '5'); // 判断5根K线
+const KLINE_COUNT = parseInt(process.env.KLINE_COUNT || '8'); // 判断8根K线
 const POSITION_SIZE_PCT = parseFloat(process.env.POSITION_SIZE_PCT || '0.5'); // 仓位50%
-const TAKE_PROFIT_PCT = parseFloat(process.env.TAKE_PROFIT_PCT || '0.03'); // 止盈3%
-const STOP_LOSS_PCT = parseFloat(process.env.STOP_LOSS_PCT || '0.02'); // 止损2%
+const TAKE_PROFIT_PCT = parseFloat(process.env.TAKE_PROFIT_PCT || '0.015'); // 止盈3%
+const STOP_LOSS_PCT = parseFloat(process.env.STOP_LOSS_PCT || '0.03'); // 止损2%
 const MARGIN_MODE = process.env.MARGIN_MODE || 'cross'; // 保证金模式：cross(全仓) 或 isolated(逐仓)
 
 if (!API_KEY || !SECRET_KEY || !PASSPHRASE) {

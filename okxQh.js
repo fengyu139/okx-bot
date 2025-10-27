@@ -166,9 +166,12 @@ async function updateAccountBalance() {
 }
 async function checkPosition(){
     let res = await getPositions();
+    let uplTotal = 0;
     res.data.forEach(b=>{
        log(`${b.instId}：持仓数量:${parseInt(b.availPos)},开仓价格:${b.avgPx},当前价格:${b.markPx}`);
+       uplTotal += parseFloat(b.upl);
     });
+    log(`--------未实现盈亏:${uplTotal.toFixed(2)}----------`);
 }
 // 获取持仓数据
 async function getPositions(instId) {
@@ -274,9 +277,9 @@ async function closeIPPositionLimit(instId) {
         instId: `${instId}-USDT`,
         tdMode: "cross",
         side: "sell",
-        ordType: "market",       // 限价单
-        px: currentPrice.toString(), // 以当前市价挂单
-        sz: "4660",
+        ordType: "limit",       // 限价单
+        px: 2.645, // 以当前市价挂单
+        sz: "5660",
         ccy: "USDT"
     });
 
@@ -303,8 +306,9 @@ async function closeIPPositionLimit(instId) {
         return error.response?.data;
     }
 }
+// 获取未成交订单列表
 async function getPendingOrders(instId) {
-    const path = `/api/v5/trade/orders-pending?instType=SPOT&instId=${instId}-USDT`;
+    const path = `/api/v5/trade/orders-pending?instType=MARGIN&instId=${instId}-USDT`;
     const { timestamp, signature } = signRequest("GET", path);
     const headers = {
         "OK-ACCESS-KEY": API_KEY,
@@ -312,10 +316,103 @@ async function getPendingOrders(instId) {
         "OK-ACCESS-TIMESTAMP": timestamp,
         "OK-ACCESS-PASSPHRASE": API_PASSPHRASE,
     };
-    const response = await axios.get(`${BASE_URL}${path}`, { headers });
-    console.log(response.data);
-    return response.data;
+    
+    try {
+        const response = await axios.get(`${BASE_URL}${path}`, { headers });
+        if (response.data.code === '0') {
+            log(`✅ 查询挂单成功: ${instId}`);
+            if (response.data.data && response.data.data.length > 0) {
+                response.data.data.forEach(order => {
+                    log(`  - 订单ID: ${order.ordId}, 方向: ${order.side}, 数量: ${order.sz}, 价格: ${order.px}, 状态: ${order.state}`);
+                });
+            } else {
+                log(`  - ${instId} 没有未成交订单`);
+            }
+            return response.data;
+        } else {
+            log(`❌ 查询挂单失败: ${response.data.msg}`);
+            return response.data;
+        }
+    } catch (error) {
+        log("❌ 查询挂单接口失败:", error.response?.data || error.message);
+        return null;
+    }
 }
+
+// 取消单个订单
+async function cancelPendingOrder(instId, orderId) {
+    const path = "/api/v5/trade/cancel-order";
+    const body = JSON.stringify({
+        instId: `${instId}-USDT`,
+        ordId: orderId
+    });
+
+    const { timestamp, signature } = signRequest("POST", path, body);
+    const headers = {
+        "OK-ACCESS-KEY": API_KEY,
+        "OK-ACCESS-SIGN": signature,
+        "OK-ACCESS-TIMESTAMP": timestamp,
+        "OK-ACCESS-PASSPHRASE": API_PASSPHRASE,
+        "Content-Type": "application/json",
+    };
+
+    try {
+        const response = await axios.post(`${BASE_URL}${path}`, body, { headers });
+        if (response.data.code === '0') {
+            log(`✅ 取消订单成功: ${instId} 订单ID ${orderId}`);
+            return response.data;
+        } else {
+            log(`❌ 取消订单失败: ${response.data.msg}`);
+            return response.data;
+        }
+    } catch (error) {
+        log("❌ 取消订单接口失败:", error.response?.data || error.message);
+        return null;
+    }
+}
+
+// 取消某交易对的所有挂单
+async function cancelAllPendingOrders(instId) {
+    const path = "/api/v5/trade/cancel-all";
+    const body = JSON.stringify({
+        instId: `${instId}-USDT`
+    });
+
+    const { timestamp, signature } = signRequest("POST", path, body);
+    const headers = {
+        "OK-ACCESS-KEY": API_KEY,
+        "OK-ACCESS-SIGN": signature,
+        "OK-ACCESS-TIMESTAMP": timestamp,
+        "OK-ACCESS-PASSPHRASE": API_PASSPHRASE,
+        "Content-Type": "application/json",
+    };
+
+    try {
+        const response = await axios.post(`${BASE_URL}${path}`, body, { headers });
+        if (response.data.code === '0') {
+            log(`✅ 取消所有挂单成功: ${instId}`);
+            return response.data;
+        } else {
+            log(`❌ 取消所有挂单失败: ${response.data.msg}`);
+            return response.data;
+        }
+    } catch (error) {
+        log("❌ 取消所有挂单接口失败:", error);
+        return null;
+    }
+}
+
+// 这个函数已被上面的新版本替代，保留用于向后兼容
+
+// === 使用示例 ===
+// 1. 查询某个交易对的挂单
+getPendingOrders('XRP');
+
+// 2. 取消某个订单（需要先查询获取 orderId）
+// cancelPendingOrder('XRP', '2984692732155076608');
+
+// 3. 取消某个交易对的所有挂单
+// cancelAllPendingOrders('XRP');
 
 // getPendingOrders('PEOPLE');
 // closeIPPositionLimit('XRP');

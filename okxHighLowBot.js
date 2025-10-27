@@ -33,8 +33,8 @@ const LEVERAGE = parseInt(process.env.LEVERAGE || '10'); // 10倍杠杆
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '300000'); // 5分钟 = 300000ms
 const LOOKBACK_HOURS = parseInt(process.env.LOOKBACK_HOURS || '12'); // 回溯12小时
 const POSITION_SIZE_PCT = parseFloat(process.env.POSITION_SIZE_PCT || '0.4'); // 仓位50%
-const TAKE_PROFIT_PCT = parseFloat(process.env.TAKE_PROFIT_PCT || '0.03'); // 止盈5%
-const STOP_LOSS_PCT = parseFloat(process.env.STOP_LOSS_PCT || '0.02'); // 止损3%
+const TAKE_PROFIT_PCT = parseFloat(process.env.TAKE_PROFIT_PCT || '0.015'); // 止盈5%
+const STOP_LOSS_PCT = parseFloat(process.env.STOP_LOSS_PCT || '0.03'); // 止损3%
 const MARGIN_MODE = process.env.MARGIN_MODE || 'cross'; // 保证金模式：cross(全仓) 或 isolated(逐仓)
 
 if (!API_KEY || !SECRET_KEY || !PASSPHRASE) {
@@ -276,7 +276,7 @@ async function analyzeHighLow(instId) {
     }
     
     // 获取最近12小时的数据
-    const lookbackCandles = candles.slice(0, Math.floor(LOOKBACK_HOURS * 12)); // 12小时 = 144根5分钟K线
+    const lookbackCandles = candles.slice(0, Math.floor(LOOKBACK_HOURS * 24)); // 12小时 = 144根5分钟K线
     const currentPrice = candles[0].close; // OKX返回的数据是从最新到最旧
     
     // 计算12小时内的最高价和最低价

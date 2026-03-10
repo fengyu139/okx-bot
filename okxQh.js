@@ -10,7 +10,7 @@ const API_SECRET = process.env.OKX_SECRET_KEY;
 const API_PASSPHRASE = process.env.OKX_PASSPHRASE;
 const BASE_URL = process.env.OKX_BASE_URL;
 //'BTC', 'ETH', 'LINK', 'XRP','TRUMP','DOGE','PEPE'
-const instArr = ['XRP','PEPE',]; // 支持的币种数组
+const instArr = ['DOGE','SOL',]; // 支持的币种数组
 
 // 动态初始化交易状态
 let tradingState = {};
@@ -278,8 +278,8 @@ async function closeIPPositionLimit(instId) {
         tdMode: "cross",
         side: "sell",
         ordType: "limit",       // 限价单
-        px: 2.645, // 以当前市价挂单
-        sz: "5660",
+        px: 0.169, // 以当前市价挂单
+        sz: "68639",
         ccy: "USDT"
     });
 
@@ -406,16 +406,16 @@ async function cancelAllPendingOrders(instId) {
 
 // === 使用示例 ===
 // 1. 查询某个交易对的挂单
-getPendingOrders('XRP');
+// getPendingOrders('XRP');
 
 // 2. 取消某个订单（需要先查询获取 orderId）
-// cancelPendingOrder('XRP', '2984692732155076608');
+// cancelPendingOrder('DOGE', '3011782881657430017');
 
 // 3. 取消某个交易对的所有挂单
 // cancelAllPendingOrders('XRP');
 
-// getPendingOrders('PEOPLE');
-// closeIPPositionLimit('XRP');
+getPendingOrders('ETH');
+// closeIPPositionLimit('DOGE');
 // ✅ 主循环
 async function main() {
     while (true) {

@@ -57,14 +57,28 @@ def init_okx_sdk():
     初始化 python-okx SDK 的 Account / Market / Trade 客户端
     """
     global account_api, market_api, trade_api
+
     log(OKX_ENV_FLAG)
     if not (API_KEY and API_SECRET and API_PASSPHRASE):
         raise RuntimeError("环境变量缺失：OKX_API_KEY / OKX_SECRET_KEY / OKX_PASSPHRASE 必须配置")
 
-    # debug=False 表示不输出 SDK 调试日志，flag: 0 实盘，1 模拟盘
-    account_api = Account.AccountAPI(API_KEY, API_SECRET, API_PASSPHRASE, False, OKX_ENV_FLAG)
+    # 使用关键字参数，兼容不同版本 python-okx 的 __init__ 签名
+    # flag: 0 实盘，1 模拟盘；debug=False 表示不输出 SDK 调试日志
+    account_api = Account.AccountAPI(
+        api_key=API_KEY,
+        api_secret_key=API_SECRET,
+        passphrase=API_PASSPHRASE,
+        flag=OKX_ENV_FLAG,
+        debug=False,
+    )
     market_api = MarketData.MarketAPI(flag=OKX_ENV_FLAG)
-    trade_api = Trade.TradeAPI(API_KEY, API_SECRET, API_PASSPHRASE, False, OKX_ENV_FLAG)
+    trade_api = Trade.TradeAPI(
+        api_key=API_KEY,
+        api_secret_key=API_SECRET,
+        passphrase=API_PASSPHRASE,
+        flag=OKX_ENV_FLAG,
+        debug=False,
+    )
 
 
 def get_ticker(inst_id: str) -> float:

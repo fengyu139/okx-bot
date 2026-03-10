@@ -1,6 +1,7 @@
 import os
 import time
 from datetime import datetime
+from typing import Optional, List, Dict
 
 from dotenv import load_dotenv
 import okx.Account as Account
@@ -38,12 +39,12 @@ API_KEY = os.getenv("OKX_API_KEY")
 API_SECRET = os.getenv("OKX_SECRET_KEY")
 API_PASSPHRASE = os.getenv("OKX_PASSPHRASE")
 
-# 0: 实盘, 1: 模拟盘（与官方示例保持一致：flag = \"1\" 为 demo）
+# 0: 实盘, 1: 模拟盘（与官方示例保持一致：flag = "1" 为 demo）
 OKX_ENV_FLAG = os.getenv("OKX_ENV_FLAG", "1")
 
-account_api: Account.AccountAPI | None = None
-market_api: MarketData.MarketAPI | None = None
-trade_api: Trade.TradeAPI | None = None
+account_api: Optional[Account.AccountAPI] = None
+market_api: Optional[MarketData.MarketAPI] = None
+trade_api: Optional[Trade.TradeAPI] = None
 
 
 def log(msg: str):
@@ -86,7 +87,7 @@ def get_account_balance(ccy: str = "USDT") -> float:
     return 0.0
 
 
-def get_open_orders(inst_id: str) -> list[dict]:
+def get_open_orders(inst_id: str) -> List[Dict]:
     if trade_api is None:
         raise RuntimeError("trade_api 未初始化，请先调用 init_okx_sdk()")
     # instType 使用 SWAP，过滤该合约的未成交订单
@@ -154,9 +155,9 @@ class PerpGridBot:
         self.cfg = config
         self.grid_prices = self._build_grid_prices()
         # 记录每条网格当前挂单的 ordId，便于后续检查 / 取消 / 重新挂单
-        self.order_map: dict[float, dict] = {}
+        self.order_map: Dict[float, Dict] = {}
 
-    def _build_grid_prices(self) -> list[float]:
+    def _build_grid_prices(self) -> List[float]:
         step = (self.cfg.upper_price - self.cfg.lower_price) / self.cfg.grid_num
         prices = [round(self.cfg.lower_price + i * step, 6) for i in range(self.cfg.grid_num + 1)]
         log(f"生成网格价格 {len(prices)} 条，从 {prices[0]} 到 {prices[-1]}，步长 {step:.6f}")

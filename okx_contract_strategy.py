@@ -33,11 +33,60 @@ market_api: Optional[MarketData.MarketAPI] = None
 trade_api: Optional[Trade.TradeAPI] = None
 public_api: Optional[PublicData.PublicAPI] = None
 
+_LOG_FILE_PATH = os.path.join(os.path.dirname(__file__), "okx_contract_strategy.log")
+_LAST_LOG_CLEANUP_TS: float = 0.0
+
+
+def _cleanup_log_if_needed():
+    """
+    简单的日志清理策略：按运行时间周期清理。
+    - 每次调用都会检查“距离上次清理是否已经超过 7 天”，超过则清空日志文件。
+    - 同时也会用日志文件的 mtime 做兜底（防止进程重启后状态丢失）。
+    """
+    import time
+    from datetime import datetime, timedelta
+
+    global _LAST_LOG_CLEANUP_TS
+
+    try:
+        now_ts = time.time()
+        seven_days = 7 * 24 * 60 * 60
+
+        # 运行期内按时间间隔控制清理频率
+        if _LAST_LOG_CLEANUP_TS and (now_ts - _LAST_LOG_CLEANUP_TS) < seven_days:
+            return
+
+        if not os.path.exists(_LOG_FILE_PATH):
+            _LAST_LOG_CLEANUP_TS = now_ts
+            return
+
+        mtime = datetime.fromtimestamp(os.path.getmtime(_LOG_FILE_PATH))
+        if datetime.now() - mtime >= timedelta(days=7):
+            # 直接截断为 0 长度，相当于清空
+            with open(_LOG_FILE_PATH, "w", encoding="utf-8"):
+                pass
+            _LAST_LOG_CLEANUP_TS = now_ts
+        else:
+            _LAST_LOG_CLEANUP_TS = now_ts
+    except Exception:
+        # 清理失败不影响主流程
+        pass
+
 
 def log(msg: str):
+    """同时打印到控制台并追加写入本地日志文件。"""
     from datetime import datetime
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{ts}] {msg}")
+    line = f"[{ts}] {msg}"
+    # 控制台输出（方便前台调试）
+    print(line)
+    # 追加写入文件
+    try:
+        with open(_LOG_FILE_PATH, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        # 写文件失败时忽略，避免影响策略运行
+        pass
 
 
 def init_okx_sdk():
@@ -186,6 +235,9 @@ def notional_to_contracts(notional_usdt: float, price: float, ct_val: float) -> 
 
 
 def run_once():
+    # 按运行时间周期检查是否需要每周清理一次日志
+    _cleanup_log_if_needed()
+
     balance = get_account_balance("USDT")
     price_now = get_ticker(INST_ID)
     ct_val = get_contract_value(INST_ID)

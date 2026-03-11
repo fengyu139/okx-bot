@@ -1,7 +1,8 @@
+import json
 import os
 import time
 from datetime import datetime
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 
 from dotenv import load_dotenv
 import okx.Account as Account
@@ -81,6 +82,51 @@ def init_okx_sdk():
     )
 
 
+# 公共行情 base（无需鉴权）
+OKX_PUBLIC_BASE = os.getenv("OKX_BASE_URL", "https://www.okx.com")
+
+
+def get_price_range_from_history(
+    inst_id: str,
+    months: int = 2,
+    buffer_pct: float = 0.03,
+) -> Tuple[float, float]:
+    """
+    根据近 N 个月的日 K 线计算网格下界与上界。
+    - 使用 OKX 公共接口 GET /api/v5/market/candles，无需 API 密钥。
+    - 取收盘价的最小/最大，再向外扩展 buffer_pct（默认 3%）作为网格区间。
+    """
+    limit = min(months * 31, 100)  # 约 2 个月最多 62 根，OKX 单次最多 100/300
+    url = f"{OKX_PUBLIC_BASE}/api/v5/market/candles?instId={inst_id}&bar=1D&limit={limit}"
+    try:
+        try:
+            from urllib.request import urlopen
+            with urlopen(url, timeout=10) as r:
+                data = json.loads(r.read().decode())
+        except Exception:
+            import requests
+            r = requests.get(url, timeout=10)
+            data = r.json()
+    except Exception as e:
+        log(f"获取历史 K 线失败，将使用当前价±10% 作为区间: {e}")
+        return (0.0, 0.0)  # 由调用方用 ticker 兜底
+
+    if data.get("code") != "0" or not data.get("data"):
+        log("历史 K 线返回为空或错误，将使用当前价±10% 作为区间")
+        return (0.0, 0.0)
+
+    # OKX 返回 [ts, o, h, l, c, vol, ...]，按时间倒序，[0] 为最新
+    closes = [float(c[4]) for c in data["data"]]
+    low, high = min(closes), max(closes)
+    lower = round(low * (1 - buffer_pct), 6)
+    upper = round(high * (1 + buffer_pct), 6)
+    if lower >= upper:
+        lower = round(low * 0.97, 6)
+        upper = round(high * 1.03, 6)
+    log(f"近 {months} 个月价格区间: 最低 {low:.4f}, 最高 {high:.4f} -> 网格边界 [{lower}, {upper}] (buffer={buffer_pct:.0%})")
+    return (lower, upper)
+
+
 def get_ticker(inst_id: str) -> float:
     if market_api is None:
         raise RuntimeError("market_api 未初始化，请先调用 init_okx_sdk()")
@@ -104,9 +150,13 @@ def get_account_balance(ccy: str = "USDT") -> float:
 def get_open_orders(inst_id: str) -> List[Dict]:
     if trade_api is None:
         raise RuntimeError("trade_api 未初始化，请先调用 init_okx_sdk()")
-    # instType 使用 SWAP，过滤该合约的未成交订单
-    data = trade_api.get_orders_pending(instType="SWAP", instId=inst_id)
-    return data.get("data", [])
+    # 兼容不同版本 SDK：有的用 get_orders_pending，有的用 get_order_list
+    try:
+        data = trade_api.get_orders_pending(instType="SWAP", instId=inst_id)
+    except AttributeError:
+        data = trade_api.get_order_list(instType="SWAP", instId=inst_id)
+    orders = data.get("data", [])
+    return [o for o in orders if o.get("instId") == inst_id] if orders else []
 
 
 def cancel_order(inst_id: str, ord_id: str):
@@ -116,14 +166,27 @@ def cancel_order(inst_id: str, ord_id: str):
     log(f"取消订单成功 instId={inst_id} ordId={ord_id} resp={data}")
 
 
+def set_leverage_for_inst(inst_id: str, leverage: int):
+    """设置合约杠杆（全仓）。下单前调用一次即可。"""
+    if account_api is None:
+        return
+    try:
+        account_api.set_leverage(instId=inst_id, lever=str(leverage), mgnMode="cross")
+        log(f"设置杠杆 {inst_id} -> {leverage}x")
+    except Exception as e:
+        log(f"设置杠杆失败（可忽略）: {e}")
+
+
 def place_limit_order(inst_id: str, side: str, px: float, sz: float, leverage: int = 5) -> dict:
     """
     side: buy / sell
     px:   限价
     sz:   合约张数（注意 OKX 合约面值，实际下单前请根据品种调整）
+    注：杠杆通过 set_leverage_for_inst 在初始化时设置，部分 SDK 的 place_order 不支持 lever 参数
     """
     if trade_api is None:
         raise RuntimeError("trade_api 未初始化，请先调用 init_okx_sdk()")
+    # 部分 python-okx 的 place_order 不接受 lever，杠杆请在策略初始化时用 set_leverage_for_inst 设置
     data = trade_api.place_order(
         instId=inst_id,
         tdMode="cross",
@@ -131,7 +194,6 @@ def place_limit_order(inst_id: str, side: str, px: float, sz: float, leverage: i
         ordType="limit",
         px=str(px),
         sz=str(sz),
-        lever=str(leverage),
     )
     log(f"下单成功 side={side} px={px} sz={sz} resp={data}")
     return data
@@ -191,6 +253,7 @@ class PerpGridBot:
         return round(sz, 0)
 
     def init_grid_orders(self):
+        set_leverage_for_inst(self.cfg.inst_id, self.cfg.leverage)
         last_price = get_ticker(self.cfg.inst_id)
         balance = get_account_balance("USDT")
         log(f"当前价格: {last_price}, 可用 USDT: {balance}")
@@ -292,15 +355,28 @@ def main():
         log(f"初始化 OKX SDK 失败: {e}")
         return
 
-    # 你可以在这里根据需要改参数
+    # 交易对与固定参数（网格区间由近 2 个月历史自动计算）
+    inst_id = "DOGE-USDT-SWAP"
+    lower_price, upper_price = get_price_range_from_history(
+        inst_id,
+        months=2,
+        buffer_pct=0.03,
+    )
+    if lower_price <= 0 or upper_price <= 0:
+        # 历史接口失败时用当前价 ±10% 兜底
+        mid = get_ticker(inst_id)
+        lower_price = round(mid * 0.90, 6)
+        upper_price = round(mid * 1.10, 6)
+        log(f"使用当前价兜底: 当前 {mid:.4f} -> 网格边界 [{lower_price}, {upper_price}]")
+
     cfg = GridConfig(
-        inst_id="DOGE-USDT-SWAP",   # 永续合约交易对
-        lower_price=0.15,           # 网格下边界
-        upper_price=0.18,           # 网格上边界
-        grid_num=20,                # 网格数量
-        total_usdt=200,             # 计划投入 USDT 总量（估算用）
-        leverage=5,                 # 杠杆倍数
-        check_interval_sec=20,      # 轮询检查间隔（秒）
+        inst_id=inst_id,
+        lower_price=lower_price,
+        upper_price=upper_price,
+        grid_num=20,
+        total_usdt=200,
+        leverage=5,
+        check_interval_sec=20,
     )
 
     bot = PerpGridBot(cfg)

@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 import okx.Account as Account
 import okx.MarketData as MarketData
 import okx.Trade as Trade
+import okx.PublicData as PublicData
 
 load_dotenv()
 
@@ -30,6 +31,7 @@ OKX_PUBLIC_BASE = os.getenv("OKX_BASE_URL", "https://www.okx.com")
 account_api: Optional[Account.AccountAPI] = None
 market_api: Optional[MarketData.MarketAPI] = None
 trade_api: Optional[Trade.TradeAPI] = None
+public_api: Optional[PublicData.PublicAPI] = None
 
 
 def log(msg: str):
@@ -39,7 +41,7 @@ def log(msg: str):
 
 
 def init_okx_sdk():
-    global account_api, market_api, trade_api
+    global account_api, market_api, trade_api, public_api
     if not (API_KEY and API_SECRET and API_PASSPHRASE):
         raise RuntimeError("环境变量缺失：OKX_API_KEY / OKX_SECRET_KEY / OKX_PASSPHRASE 必须配置")
     account_api = Account.AccountAPI(
@@ -57,6 +59,7 @@ def init_okx_sdk():
         flag=OKX_ENV_FLAG,
         debug=False,
     )
+    public_api = PublicData.PublicAPI(flag=OKX_ENV_FLAG)
 
 
 def get_ticker(inst_id: str) -> float:
@@ -84,32 +87,30 @@ def get_candles_8h(inst_id: str) -> List[float]:
     返回最近 8 小时内每根 1H K 线的收盘价列表（从新到旧）。
     [0]=最新一根收盘，[1]=1小时前，...，[8]=8小时前。共 9 个价格。
     """
-    url = f"{OKX_PUBLIC_BASE}/api/v5/market/candles?instId={inst_id}&bar=1H&limit=9"
-    # 为兼容老系统的 OpenSSL 版本，这里只使用标准库 urllib，不再回退到 requests/urllib3
+    if market_api is None:
+        raise RuntimeError("market_api 未初始化")
+    # 使用 python-okx SDK 的 MarketAPI.get_candlesticks 获取 1H K 线
     try:
-        from urllib.request import urlopen
-        with urlopen(url, timeout=10) as r:
-            data = json.loads(r.read().decode())
+        data = market_api.get_candlesticks(instId=inst_id, bar="1H", limit="9")
     except Exception as e:
         log(f"获取 8H K 线失败: {e}")
         raise
     if data.get("code") != "0" or not data.get("data") or len(data["data"]) < 9:
         raise RuntimeError("8H K 线数据不足")
-    # 倒序：data[0]=最新一根，data[8]=8小时前；每根 [4] 为收盘价
+    # 返回 [ts, o, h, l, c, vol, ...]，data[0] 为最新一根，取收盘价 c
     closes = [float(c[4]) for c in data["data"]]
     return closes
 
 
 def get_contract_value(inst_id: str) -> float:
     """获取合约面值（每张合约对应的标的数量，如 DOGE 为 10）。"""
-    url = f"{OKX_PUBLIC_BASE}/api/v5/public/instruments?instType=SWAP&instId={inst_id}"
-    # 同样只使用 urllib，避免触发 urllib3 对旧 OpenSSL 的限制
+    if public_api is None:
+        return 10.0
     try:
-        from urllib.request import urlopen
-        with urlopen(url, timeout=10) as r:
-            data = json.loads(r.read().decode())
+        # 使用 python-okx PublicData.PublicAPI 获取合约基础信息
+        data = public_api.get_instruments(instType="SWAP", instId=inst_id)
     except Exception:
-        return 10.0  # 常见 DOGE 等为 10
+        return 10.0  # 兜底
     if data.get("code") != "0" or not data.get("data"):
         return 10.0
     ct_val = data["data"][0].get("ctVal", "10")

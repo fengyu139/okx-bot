@@ -85,15 +85,11 @@ def get_candles_8h(inst_id: str) -> List[float]:
     [0]=最新一根收盘，[1]=1小时前，...，[8]=8小时前。共 9 个价格。
     """
     url = f"{OKX_PUBLIC_BASE}/api/v5/market/candles?instId={inst_id}&bar=1H&limit=9"
+    # 为兼容老系统的 OpenSSL 版本，这里只使用标准库 urllib，不再回退到 requests/urllib3
     try:
-        try:
-            from urllib.request import urlopen
-            with urlopen(url, timeout=10) as r:
-                data = json.loads(r.read().decode())
-        except Exception:
-            import requests
-            r = requests.get(url, timeout=10)
-            data = r.json()
+        from urllib.request import urlopen
+        with urlopen(url, timeout=10) as r:
+            data = json.loads(r.read().decode())
     except Exception as e:
         log(f"获取 8H K 线失败: {e}")
         raise
@@ -107,15 +103,11 @@ def get_candles_8h(inst_id: str) -> List[float]:
 def get_contract_value(inst_id: str) -> float:
     """获取合约面值（每张合约对应的标的数量，如 DOGE 为 10）。"""
     url = f"{OKX_PUBLIC_BASE}/api/v5/public/instruments?instType=SWAP&instId={inst_id}"
+    # 同样只使用 urllib，避免触发 urllib3 对旧 OpenSSL 的限制
     try:
-        try:
-            from urllib.request import urlopen
-            with urlopen(url, timeout=10) as r:
-                data = json.loads(r.read().decode())
-        except Exception:
-            import requests
-            r = requests.get(url, timeout=10)
-            data = r.json()
+        from urllib.request import urlopen
+        with urlopen(url, timeout=10) as r:
+            data = json.loads(r.read().decode())
     except Exception:
         return 10.0  # 常见 DOGE 等为 10
     if data.get("code") != "0" or not data.get("data"):

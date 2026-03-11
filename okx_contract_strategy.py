@@ -171,7 +171,6 @@ def set_leverage(inst_id: str, leverage: int):
         return
     try:
         account_api.set_leverage(instId=inst_id, lever=str(leverage), mgnMode="cross")
-        log(f"设置杠杆 {inst_id} -> {leverage}x")
     except Exception as e:
         log(f"设置杠杆失败: {e}")
 
@@ -258,22 +257,22 @@ def run_once():
             tp_px = avg_px * (1 + TP_PCT / 100)
             sl_px = avg_px * (1 - SL_PCT / 100)
             if mark_px >= tp_px:
-                log(f"多单止盈: 当前 {mark_px:.4f} >= TP {tp_px:.4f}")
+                log(f"🎯 多单止盈: 当前 {mark_px:.4f} >= TP {tp_px:.4f}")
                 close_position_market(INST_ID, "sell", pos_sz)
                 return
             if mark_px <= sl_px:
-                log(f"多单止损: 当前 {mark_px:.4f} <= SL {sl_px:.4f}")
+                log(f"🛑 多单止损: 当前 {mark_px:.4f} <= SL {sl_px:.4f}")
                 close_position_market(INST_ID, "sell", pos_sz)
                 return
         else:
             tp_px = avg_px * (1 - TP_PCT / 100)
             sl_px = avg_px * (1 + SL_PCT / 100)
             if mark_px <= tp_px:
-                log(f"空单止盈: 当前 {mark_px:.4f} <= TP {tp_px:.4f}")
+                log(f"🎯 空单止盈: 当前 {mark_px:.4f} <= TP {tp_px:.4f}")
                 close_position_market(INST_ID, "buy", pos_sz)
                 return
             if mark_px >= sl_px:
-                log(f"空单止损: 当前 {mark_px:.4f} >= SL {sl_px:.4f}")
+                log(f"🛑 空单止损: 当前 {mark_px:.4f} >= SL {sl_px:.4f}")
                 close_position_market(INST_ID, "buy", pos_sz)
                 return
         # 打印详细持仓信息
@@ -302,10 +301,10 @@ def run_once():
         change_pct = (price_now - close_i) / close_i * 100
         if change_pct >= THRESHOLD_PCT:
             should_short = True
-            log(f"当前价 {price_now:.4f} 相对第 {i} 根(约 {i}h 前)收盘 {close_i:.4f} 涨幅 {change_pct:+.2f}% >= {THRESHOLD_PCT}% -> 满足开空")
+            log(f"⚡ 触发做空条件: 当前价 {price_now:.4f} 相对第 {i} 根(约 {i}h 前)收盘 {close_i:.4f} 涨幅 {change_pct:+.2f}% >= {THRESHOLD_PCT}%")
         if change_pct <= -THRESHOLD_PCT:
             should_long = True
-            log(f"当前价 {price_now:.4f} 相对第 {i} 根(约 {i}h 前)收盘 {close_i:.4f} 跌幅 {change_pct:+.2f}% <= -{THRESHOLD_PCT}% -> 满足开多")
+            log(f"⚡ 触发做多条件: 当前价 {price_now:.4f} 相对第 {i} 根(约 {i}h 前)收盘 {close_i:.4f} 跌幅 {change_pct:+.2f}% <= -{THRESHOLD_PCT}%")
     if not should_short and not should_long:
         min_c, max_c = min(hourly_closes), max(hourly_closes)
         log(f"近 {LOOKBACK_HOURS} 小时: 当前={price_now:.4f} 区间=[{min_c:.4f}, {max_c:.4f}] 未达 ±{THRESHOLD_PCT}%")
@@ -322,17 +321,17 @@ def run_once():
 
     # 若同时满足多空条件，优先开空（可改为优先开多或按其他规则）
     if should_short:
-        log(f"触发开空，保证金≈{margin:.0f} USDT x{LEVERAGE}倍 -> 名义≈{notional:.0f} USDT，张数={sz:.0f}")
+        log(f"🚀 开空下单：保证金≈{margin:.0f} USDT x{LEVERAGE}倍 -> 名义≈{notional:.0f} USDT，张数={sz:.0f}")
         res = place_market_order(INST_ID, "sell", sz)
         if res.get("code") == "0":
-            log("开空成功")
+            log("✅ 开空成功")
         else:
             log(f"开空失败: {res}")
     elif should_long:
-        log(f"触发开多，保证金≈{margin:.0f} USDT x{LEVERAGE}倍 -> 名义≈{notional:.0f} USDT，张数={sz:.0f}")
+        log(f"🚀 开多下单：保证金≈{margin:.0f} USDT x{LEVERAGE}倍 -> 名义≈{notional:.0f} USDT，张数={sz:.0f}")
         res = place_market_order(INST_ID, "buy", sz)
         if res.get("code") == "0":
-            log("开多成功")
+            log("✅ 开多成功")
         else:
             log(f"开多失败: {res}")
 

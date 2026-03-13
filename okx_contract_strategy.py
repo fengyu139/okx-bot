@@ -133,20 +133,20 @@ def get_account_balance(ccy: str = "USDT") -> float:
 
 def get_candles_8h(inst_id: str) -> List[float]:
     """
-    返回最近 8 小时内每根 1H K 线的收盘价列表（从新到旧）。
-    [0]=最新一根收盘，[1]=1小时前，...，[8]=8小时前。共 9 个价格。
+    返回最近 8 小时内每根 15 分钟 K 线的收盘价列表（从新到旧）。
+    8 小时 = 32 根 15m，这里取 33 根：[0] 为最新一根，[32] 约为 8 小时前。
     """
     if market_api is None:
         raise RuntimeError("market_api 未初始化")
-    # 使用 python-okx SDK 的 MarketAPI.get_candlesticks 获取 1H K 线
+    # 使用 python-okx SDK 的 MarketAPI.get_candlesticks 获取 15m K 线
     try:
-        data = market_api.get_candlesticks(instId=inst_id, bar="1H", limit="9")
+        data = market_api.get_candlesticks(instId=inst_id, bar="15m", limit="33")
     except Exception as e:
         log(f"获取 8H K 线失败: {e}")
         raise
-    if data.get("code") != "0" or not data.get("data") or len(data["data"]) < 9:
+    if data.get("code") != "0" or not data.get("data") or len(data["data"]) < 33:
         raise RuntimeError("8H K 线数据不足")
-    # 返回 [ts, o, h, l, c, vol, ...]，data[0] 为最新一根，取收盘价 c
+    # 返回 [ts, o, h, l, c, vol, ...]，data[0] 为最新一根 15m，取收盘价 c
     closes = [float(c[4]) for c in data["data"]]
     return closes
 
@@ -286,13 +286,13 @@ def run_once():
         mgn_ratio = pos.get("mgnRatio", "")
         return
 
-    # 无持仓：当前价与最近 8 小时内「每一小时」的收盘价比较，任一小时满足 ±7% 即触发
+    # 无持仓：当前价与最近 8 小时内「每根 15m K 线」的收盘价比较，任一周期满足 ±7% 即触发
     try:
         hourly_closes = get_candles_8h(INST_ID)
     except Exception as e:
         log(f"跳过本周期: {e}")
         return
-    # 当前价与最近 8 小时内每一根小时收盘价比较，任一小时满足 ±7% 即触发
+    # 当前价与最近 8 小时内每一根 15m 收盘价比较，任一周期满足 ±7% 即触发
     should_short = False
     should_long = False
     for i, close_i in enumerate(hourly_closes):

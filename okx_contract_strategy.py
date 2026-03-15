@@ -216,7 +216,12 @@ def close_position_market(inst_id: str, side: str, sz: float) -> Dict:
 
 
 # --------------- 策略参数 ---------------
-INST_ID = "DOGE-USDT-SWAP"
+# 支持多币种：列表中的每个永续合约都会独立检查 8H 涨跌并开仓/止盈止损，保证金按币种均分
+INST_IDS = [
+    "DOGE-USDT-SWAP",
+    "XRP-USDT-SWAP",
+    "ZEC-USDT-SWAP",
+]
 LOOKBACK_HOURS = 8
 THRESHOLD_PCT = 7.0
 LEVERAGE = 10
@@ -238,14 +243,26 @@ def run_once():
     _cleanup_log_if_needed()
 
     balance = get_account_balance("USDT")
-    price_now = get_ticker(INST_ID)
-    ct_val = get_contract_value(INST_ID)
-    positions = get_positions(INST_ID)
-    # 只处理当前交易对、有持仓量的
-    pos = next((p for p in positions if p.get("instId") == INST_ID and float(p.get("pos", 0) or 0) != 0), None)
+    # 多币种：保证金按币种数量均分，每个币种独立检查持仓/开仓
+    margin_per_symbol = balance * BALANCE_RATIO
+    notional_per_symbol = margin_per_symbol * LEVERAGE
+
+    for inst_id in INST_IDS:
+        try:
+            _run_once_for_symbol(inst_id, balance, margin_per_symbol, notional_per_symbol)
+        except Exception as e:
+            log(f"[{inst_id}] 本币种本轮异常: {e}")
+
+
+def _run_once_for_symbol(inst_id: str, balance: float, margin: float, notional: float):
+    """对单个交易对执行一轮：持仓则检查止盈止损，无仓则检查 8H 涨跌并可能开仓。"""
+    price_now = get_ticker(inst_id)
+    ct_val = get_contract_value(inst_id)
+    positions = get_positions(inst_id)
+    pos = next((p for p in positions if p.get("instId") == inst_id and float(p.get("pos", 0) or 0) != 0), None)
 
     if pos:
-        # 已有持仓：只做止盈止损检查。净持仓下 pos>0 为多，pos<0 为空
+        # 已有持仓：止盈止损检查
         avg_px = float(pos.get("avgPx", 0))
         pos_raw = float(pos.get("pos", 0))
         pos_sz = abs(int(pos_raw))
@@ -257,42 +274,33 @@ def run_once():
             tp_px = avg_px * (1 + TP_PCT / 100)
             sl_px = avg_px * (1 - SL_PCT / 100)
             if mark_px >= tp_px:
-                log(f"🎯 多单止盈: 当前 {mark_px:.4f} >= TP {tp_px:.4f}")
-                close_position_market(INST_ID, "sell", pos_sz)
+                log(f"🎯 [{inst_id}] 多单止盈: 当前 {mark_px:.4f} >= TP {tp_px:.4f}")
+                close_position_market(inst_id, "sell", pos_sz)
                 return
             if mark_px <= sl_px:
-                log(f"🛑 多单止损: 当前 {mark_px:.4f} <= SL {sl_px:.4f}")
-                close_position_market(INST_ID, "sell", pos_sz)
+                log(f"🛑 [{inst_id}] 多单止损: 当前 {mark_px:.4f} <= SL {sl_px:.4f}")
+                close_position_market(inst_id, "sell", pos_sz)
                 return
         else:
             tp_px = avg_px * (1 - TP_PCT / 100)
             sl_px = avg_px * (1 + SL_PCT / 100)
             if mark_px <= tp_px:
-                log(f"🎯 空单止盈: 当前 {mark_px:.4f} <= TP {tp_px:.4f}")
-                close_position_market(INST_ID, "buy", pos_sz)
+                log(f"🎯 [{inst_id}] 空单止盈: 当前 {mark_px:.4f} <= TP {tp_px:.4f}")
+                close_position_market(inst_id, "buy", pos_sz)
                 return
             if mark_px >= sl_px:
-                log(f"🛑 空单止损: 当前 {mark_px:.4f} >= SL {sl_px:.4f}")
-                close_position_market(INST_ID, "buy", pos_sz)
+                log(f"🛑 [{inst_id}] 空单止损: 当前 {mark_px:.4f} >= SL {sl_px:.4f}")
+                close_position_market(inst_id, "buy", pos_sz)
                 return
-        # 打印详细持仓信息
-        tp_px = avg_px * (1 + TP_PCT / 100) if pos_side == "long" else avg_px * (1 - TP_PCT / 100)
-        sl_px = avg_px * (1 - SL_PCT / 100) if pos_side == "long" else avg_px * (1 + SL_PCT / 100)
-        upl = float(pos.get("upl", 0) or 0)
-        upl_ratio = float(pos.get("uplRatio", 0) or 0) * 100
-        liq_px = pos.get("liqPx") or ""
-        lever = pos.get("lever", "")
-        margin = pos.get("margin", "")
-        mgn_ratio = pos.get("mgnRatio", "")
+        # 持仓详情（可选：打一条带 inst_id 的汇总）
         return
 
-    # 无持仓：当前价与最近 8 小时内「每根 15m K 线」的收盘价比较，任一周期满足 ±7% 即触发
+    # 无持仓：8H 内 15m K 线比较，任一周期满足 ±7% 即触发
     try:
-        hourly_closes = get_candles_8h(INST_ID)
+        hourly_closes = get_candles_8h(inst_id)
     except Exception as e:
-        log(f"跳过本周期: {e}")
+        log(f"[{inst_id}] 跳过本周期: {e}")
         return
-    # 当前价与最近 8 小时内每一根 15m 收盘价比较，任一周期满足 ±7% 即触发
     should_short = False
     should_long = False
     for i, close_i in enumerate(hourly_closes):
@@ -301,39 +309,36 @@ def run_once():
         change_pct = (price_now - close_i) / close_i * 100
         if change_pct >= THRESHOLD_PCT:
             should_short = True
-            log(f"⚡ 触发做空条件: 当前价 {price_now:.4f} 相对第 {i} 根(约 {i}h 前)收盘 {close_i:.4f} 涨幅 {change_pct:+.2f}% >= {THRESHOLD_PCT}%")
+            log(f"⚡ [{inst_id}] 触发做空条件: 当前价 {price_now:.4f} 相对第 {i} 根收盘 {close_i:.4f} 涨幅 {change_pct:+.2f}% >= {THRESHOLD_PCT}%")
         if change_pct <= -THRESHOLD_PCT:
             should_long = True
-            log(f"⚡ 触发做多条件: 当前价 {price_now:.4f} 相对第 {i} 根(约 {i}h 前)收盘 {close_i:.4f} 跌幅 {change_pct:+.2f}% <= -{THRESHOLD_PCT}%")
+            log(f"⚡ [{inst_id}] 触发做多条件: 当前价 {price_now:.4f} 相对第 {i} 根收盘 {close_i:.4f} 跌幅 {change_pct:+.2f}% <= -{THRESHOLD_PCT}%")
     if not should_short and not should_long:
         min_c, max_c = min(hourly_closes), max(hourly_closes)
-        log(f"近 {LOOKBACK_HOURS} 小时: 当前={price_now:.4f} 区间=[{min_c:.4f}, {max_c:.4f}] 未达 ±{THRESHOLD_PCT}%")
-
-    # 保证金 = 账户余额的 2/3；实际仓位名义价值 = 保证金 × 杠杆（10 倍）
-    margin = balance * BALANCE_RATIO
-    notional = margin * LEVERAGE
-    sz = notional_to_contracts(notional, price_now, ct_val)
-    if sz < 1:
-        log("计算张数不足 1，跳过开仓")
+        log(f"[{inst_id}] 近 {LOOKBACK_HOURS}h 当前={price_now:.4f} 区间=[{min_c:.4f},{max_c:.4f}] 未达 ±{THRESHOLD_PCT}%")
         return
 
-    set_leverage(INST_ID, LEVERAGE)
+    sz = notional_to_contracts(notional, price_now, ct_val)
+    if sz < 1:
+        log(f"[{inst_id}] 计算张数不足 1，跳过开仓")
+        return
 
-    # 若同时满足多空条件，优先开空（可改为优先开多或按其他规则）
+    set_leverage(inst_id, LEVERAGE)
+
     if should_short:
-        log(f"🚀 开空下单：保证金≈{margin:.0f} USDT x{LEVERAGE}倍 -> 名义≈{notional:.0f} USDT，张数={sz:.0f}")
-        res = place_market_order(INST_ID, "sell", sz)
+        log(f"🚀 [{inst_id}] 开空下单：保证金≈{margin:.0f} USDT x{LEVERAGE}倍 -> 名义≈{notional:.0f} USDT，张数={sz:.0f}")
+        res = place_market_order(inst_id, "sell", sz)
         if res.get("code") == "0":
-            log("✅ 开空成功")
+            log(f"✅ [{inst_id}] 开空成功")
         else:
-            log(f"开空失败: {res}")
+            log(f"[{inst_id}] 开空失败: {res}")
     elif should_long:
-        log(f"🚀 开多下单：保证金≈{margin:.0f} USDT x{LEVERAGE}倍 -> 名义≈{notional:.0f} USDT，张数={sz:.0f}")
-        res = place_market_order(INST_ID, "buy", sz)
+        log(f"🚀 [{inst_id}] 开多下单：保证金≈{margin:.0f} USDT x{LEVERAGE}倍 -> 名义≈{notional:.0f} USDT，张数={sz:.0f}")
+        res = place_market_order(inst_id, "buy", sz)
         if res.get("code") == "0":
-            log("✅ 开多成功")
+            log(f"✅ [{inst_id}] 开多成功")
         else:
-            log(f"开多失败: {res}")
+            log(f"[{inst_id}] 开多失败: {res}")
 
 
 def main():
@@ -342,7 +347,7 @@ def main():
     except Exception as e:
         log(f"初始化失败: {e}")
         return
-    log("OKX 合约策略启动：8H 涨跌超 7% 反向开单，止盈 6%，止损 5%")
+    log(f"OKX 合约策略启动：多币种 {INST_IDS}，8H 涨跌超 7% 反向开单，止盈 6%，止损 5%")
     while True:
         try:
             run_once()

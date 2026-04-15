@@ -276,10 +276,9 @@ async function closeIPPositionLimit(instId) {
     const body = JSON.stringify({
         instId: `${instId}-USDT`,
         tdMode: "cross",
-        side: "sell",
-        ordType: "limit",       // 限价单
-        px: 0.169, // 以当前市价挂单
-        sz: "68639",
+        side: "buy",
+        ordType: "market",       
+        sz: "117647",
         ccy: "USDT"
     });
 
@@ -414,7 +413,7 @@ async function cancelAllPendingOrders(instId) {
 // 3. 取消某个交易对的所有挂单
 // cancelAllPendingOrders('XRP');
 
-getPendingOrders('ETH');
+getPendingOrders('DOGE');
 // closeIPPositionLimit('DOGE');
 // ✅ 主循环
 async function main() {

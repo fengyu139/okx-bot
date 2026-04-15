@@ -228,7 +228,7 @@ LEVERAGE = 10
 BALANCE_RATIO = 2 / 3
 TP_PCT = 6.0
 SL_PCT = 5.0
-CHECK_INTERVAL_SEC = 60
+CHECK_INTERVAL_SEC = 90
 
 
 def notional_to_contracts(notional_usdt: float, price: float, ct_val: float) -> float:
@@ -315,7 +315,7 @@ def _run_once_for_symbol(inst_id: str, balance: float, margin: float, notional: 
             log(f"⚡ [{inst_id}] 触发做多条件: 当前价 {price_now:.4f} 相对第 {i} 根收盘 {close_i:.4f} 跌幅 {change_pct:+.2f}% <= -{THRESHOLD_PCT}%")
     if not should_short and not should_long:
         min_c, max_c = min(hourly_closes), max(hourly_closes)
-        log(f"[{inst_id}] 近 {LOOKBACK_HOURS}h 当前={price_now:.4f} 区间=[{min_c:.4f},{max_c:.4f}] 未达 ±{THRESHOLD_PCT}%")
+        # log(f"[{inst_id}] 近 {LOOKBACK_HOURS}h 当前={price_now:.4f} 区间=[{min_c:.4f},{max_c:.4f}] 未达 ±{THRESHOLD_PCT}%")
         return
 
     sz = notional_to_contracts(notional, price_now, ct_val)

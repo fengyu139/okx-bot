@@ -1,0 +1,4 @@
+sudo systemctl restart okx-contract.service
+sudo systemctl status okx-contract.service
+sudo systemctl stop okx-contract.service
+看日志：journalctl -u okx-contract.service -n 50 -l

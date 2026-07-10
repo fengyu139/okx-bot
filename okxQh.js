@@ -10,7 +10,7 @@ const API_SECRET = process.env.OKX_SECRET_KEY;
 const API_PASSPHRASE = process.env.OKX_PASSPHRASE;
 const BASE_URL = process.env.OKX_BASE_URL;
 //'BTC', 'ETH', 'LINK', 'XRP','TRUMP','DOGE','PEPE'
-const instArr = ['DOGE','SOL',]; // 支持的币种数组
+const instArr = ['ZEC','SOL',]; // 支持的币种数组
 
 // 动态初始化交易状态
 let tradingState = {};
@@ -413,8 +413,8 @@ async function cancelAllPendingOrders(instId) {
 // 3. 取消某个交易对的所有挂单
 // cancelAllPendingOrders('XRP');
 
-getPendingOrders('DOGE');
-// closeIPPositionLimit('DOGE');
+// getPendingOrders('DOGE');
+closeIPPositionLimit('DOGE');
 // ✅ 主循环
 async function main() {
     while (true) {
